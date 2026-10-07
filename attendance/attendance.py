@@ -1,8 +1,11 @@
 from datetime import date, datetime, time, timedelta
+import sqlite3
 from database.database import (
     get_active_nurses,
+    get_attendance_for_staff_shift,
     get_attendance_for_date,
     mark_attendance,
+    record_sign_out,
 )
 from roster.scheduler import generate_roster
 
@@ -26,6 +29,10 @@ def find_nurse_by_staff_id(staff_id):
             return nurse
 
     return None
+
+
+def find_staff_by_staff_id(staff_id):
+    return find_nurse_by_staff_id(staff_id)
 
 
 def get_nurse_shift(nurse, roster_date):
@@ -65,7 +72,10 @@ def get_duty_information(nurse):
     return shift_date, shift, current_time
 
 
-def check_in_nurse(staff_id):
+LATE_GRACE_MINUTES = 10
+
+
+def check_in_nurse(staff_id, now=None):
     if not isinstance(staff_id, str):
         return {"success": False, "message": "Staff ID must be text."}
     staff_id = staff_id.strip()
@@ -76,20 +86,26 @@ def check_in_nurse(staff_id):
     nurse = find_nurse_by_staff_id(staff_id)
 
     if nurse is None:
-        return {"success": False, "message": "Staff ID not found."}
+        return {
+            "success": False,
+            "message": "Staff ID not found in the active staff directory.",
+        }
 
-    shift_date, shift, current_time = get_duty_information(nurse)
+    now = now or datetime.now()
+    shift_date = get_shift_date(now.date(), now.time())
+    shift = get_nurse_shift(nurse, shift_date)
 
     if shift == "Off":
         return {
             "success": False,
             "message": f"{nurse[1]} is scheduled OFF for this duty period.",
             "nurse": nurse,
+            "staff": nurse,
             "shift": shift,
             "shift_date": shift_date.isoformat(),
         }
 
-    if not is_within_shift(shift, current_time):
+    if not is_within_shift(shift, now.time()):
         if shift == "Morning":
             duty_time = "7:00 AM - 7:00 PM"
         else:
@@ -102,39 +118,138 @@ def check_in_nurse(staff_id):
                 f"outside their duty hours.\n\nShift hours: {duty_time}"
             ),
             "nurse": nurse,
+            "staff": nurse,
             "shift": shift,
             "shift_date": shift_date.isoformat(),
         }
 
-    existing_attendance = get_attendance_for_date(shift_date.isoformat())
-
-    for record in existing_attendance:
-        if record[1] == nurse[0]:
-            return {
-                "success": False,
-                "message": f"{nurse[1]} has already checked in for this shift.",
-                "nurse": nurse,
-                "shift": shift,
-                "shift_date": shift_date.isoformat(),
-                "time": record[5],
-            }
-
-    attendance_time = datetime.now().strftime("%H:%M:%S")
-
-    mark_attendance(
-        nurse_id=nurse[0],
-        attendance_date=shift_date.isoformat(),
-        attendance_time=attendance_time,
-        status="Present",
+    existing = get_attendance_for_staff_shift(
+        nurse[0],
+        shift_date.isoformat(),
+        shift,
     )
+    if existing is not None:
+        if existing[3] is None:
+            message = (
+                f"{nurse[1]} is already signed in for this {shift} shift."
+            )
+        else:
+            message = (
+                f"{nurse[1]} has already completed this {shift} shift."
+            )
+        return {
+            "success": False,
+            "message": message,
+            "nurse": nurse,
+            "staff": nurse,
+            "shift": shift,
+            "shift_date": shift_date.isoformat(),
+            "time": existing[1],
+        }
+
+    attendance_time = now.strftime("%H:%M:%S")
+    shift_start = MORNING_START if shift == "Morning" else NIGHT_START
+    shift_start_at = datetime.combine(shift_date, shift_start)
+    late_after = shift_start_at + timedelta(minutes=LATE_GRACE_MINUTES)
+    status = "Late" if now > late_after else "Present"
+
+    try:
+        mark_attendance(
+            nurse_id=nurse[0],
+            attendance_date=shift_date.isoformat(),
+            attendance_time=attendance_time,
+            status=status,
+            shift=shift,
+        )
+    except sqlite3.IntegrityError:
+        return {
+            "success": False,
+            "message": f"{nurse[1]} is already signed in for this shift.",
+            "nurse": nurse,
+            "staff": nurse,
+            "shift": shift,
+            "shift_date": shift_date.isoformat(),
+        }
 
     return {
         "success": True,
-        "message": "Attendance recorded successfully.",
+        "message": (
+            "Late check-in recorded."
+            if status == "Late"
+            else "On-time check-in recorded."
+        ),
         "nurse": nurse,
+        "staff": nurse,
         "shift": shift,
         "shift_date": shift_date.isoformat(),
         "time": attendance_time,
+        "status": status,
+    }
+
+
+def check_out_nurse(staff_id, now=None):
+    if not isinstance(staff_id, str):
+        return {"success": False, "message": "Staff ID must be text."}
+    staff_id = staff_id.strip()
+    if not staff_id:
+        return {"success": False, "message": "Please enter a Staff ID."}
+
+    staff = find_staff_by_staff_id(staff_id)
+    if staff is None:
+        return {
+            "success": False,
+            "message": "Staff ID not found in the active staff directory.",
+        }
+
+    now = now or datetime.now()
+    open_shifts = []
+    for attendance_date in (now.date(), now.date() - timedelta(days=1)):
+        date_text = attendance_date.isoformat()
+        for shift in ("Morning", "Night"):
+            record = get_attendance_for_staff_shift(
+                staff[0],
+                date_text,
+                shift,
+            )
+            if record is not None and record[3] is None:
+                signed_in_at = datetime.combine(
+                    attendance_date,
+                    datetime.strptime(record[1], "%H:%M:%S").time(),
+                )
+                if signed_in_at <= now and now - signed_in_at <= timedelta(hours=18):
+                    open_shifts.append(
+                        (signed_in_at, date_text, shift, record)
+                    )
+
+    if not open_shifts:
+        return {
+            "success": False,
+            "message": "No active shift sign-in was found to sign out.",
+            "staff": staff,
+        }
+
+    _, attendance_date, shift, record = max(
+        open_shifts,
+        key=lambda item: item[0],
+    )
+    sign_out_time = now.strftime("%H:%M:%S")
+    try:
+        record_sign_out(staff[0], attendance_date, shift, sign_out_time)
+    except ValueError as error:
+        return {
+            "success": False,
+            "message": str(error),
+            "staff": staff,
+        }
+
+    return {
+        "success": True,
+        "message": f"Sign-out recorded for the {shift} shift.",
+        "staff": staff,
+        "shift": shift,
+        "shift_date": attendance_date,
+        "time": sign_out_time,
+        "sign_in_time": record[1],
     }
 
 

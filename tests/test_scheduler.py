@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from roster.scheduler import (
+    ROTATION_ANCHOR,
     generate_roster,
     get_shift_for_day,
 )
@@ -11,7 +12,7 @@ def test_three_nurse_rotation():
         (2, "Nurse 2", "NRS002", "", "Active", 1),
         (3, "Nurse 5", "NRS005", "", "Active", 2),
     ]
-    start_date = date(2026, 10, 5)
+    start_date = ROTATION_ANCHOR
 
     roster = generate_roster(
         nurses,
@@ -38,7 +39,7 @@ def test_three_nurse_rotation():
 
 
 def test_rotation_repeats_after_six_days():
-    start_date = date(2026, 10, 5)
+    start_date = ROTATION_ANCHOR
     shifts = []
 
     for day_offset in range(12):
@@ -58,7 +59,7 @@ def test_rotation_repeats_after_six_days():
 
 
 def test_rotation_patterns():
-    start_date = date(2026, 10, 5)
+    start_date = ROTATION_ANCHOR
     expected = [
         "Morning",
         "Morning",
@@ -82,8 +83,22 @@ def test_rotation_patterns():
         assert actual_shift == expected_shift
 
 
+def test_roster_shift_is_independent_of_requested_range():
+    staff = (1, "Staff 1", "MPH-NUR-000001", "", "Active", 0)
+    target_date = ROTATION_ANCHOR + timedelta(days=4)
+    full_range = generate_roster([staff], ROTATION_ANCHOR, 10)
+    single_day = generate_roster([staff], target_date, 1)
+    expected = next(
+        day["nurses"][0]["shift"]
+        for day in full_range
+        if day["date"] == target_date
+    )
+    assert single_day[0]["nurses"][0]["shift"] == expected
+
+
 if __name__ == "__main__":
     test_three_nurse_rotation()
     test_rotation_repeats_after_six_days()
     test_rotation_patterns()
+    test_roster_shift_is_independent_of_requested_range()
     print("All scheduler tests passed.")

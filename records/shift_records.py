@@ -148,7 +148,8 @@ def get_shift_records(
                 shift_records.original_shift,
                 shift_records.new_shift,
                 shift_records.reason,
-                shift_records.created_at
+                shift_records.created_at,
+                nurses.staff_type
             FROM shift_records
             INNER JOIN nurses
                 ON shift_records.nurse_id = nurses.id
@@ -170,7 +171,8 @@ def get_shift_records(
                 shift_records.original_shift,
                 shift_records.new_shift,
                 shift_records.reason,
-                shift_records.created_at
+                shift_records.created_at,
+                nurses.staff_type
             FROM shift_records
             INNER JOIN nurses
                 ON shift_records.nurse_id = nurses.id
@@ -260,3 +262,29 @@ def delete_shift_record(record_id):
     connection.close()
 
     return deleted
+
+
+def _enable_remote_access():
+    from functools import wraps
+
+    from networking.config import is_remote_client
+    from networking.transport import remote_call
+
+    for function_name in (
+        "create_shift_record",
+        "get_shift_records",
+        "update_shift_record",
+        "delete_shift_record",
+    ):
+        local_function = globals()[function_name]
+
+        @wraps(local_function)
+        def routed(*args, __name=function_name, __local=local_function, **kwargs):
+            if is_remote_client():
+                return remote_call("records.shift_records", __name, args, kwargs)
+            return __local(*args, **kwargs)
+
+        globals()[function_name] = routed
+
+
+_enable_remote_access()

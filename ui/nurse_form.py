@@ -1,11 +1,17 @@
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt
+from PySide6.QtGui import QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
+    QVBoxLayout,
     QFormLayout,
     QLineEdit,
     QComboBox,
     QPushButton,
     QHBoxLayout,
     QMessageBox,
+    QLabel,
+    QFrame,
+    QFileDialog,
 )
 
 
@@ -15,9 +21,11 @@ class NurseForm(QDialog):
         super().__init__(parent)
 
         self.nurse = nurse
+        self.profile_photo = None
+        self.remove_profile_photo = False
 
-        self.setWindowTitle("Nurse")
-        self.setFixedSize(400, 300)
+        self.setWindowTitle("Matrix Prime Hospital - Staff member")
+        self.setFixedSize(520, 700)
 
         self.setup_ui()
 
@@ -25,13 +33,121 @@ class NurseForm(QDialog):
             self.load_nurse()
 
     def setup_ui(self):
-        layout = QFormLayout()
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #F7FAFC;
+            }
+
+            QLabel#title {
+                color: #0B3B82;
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            QLabel#description {
+                color: #718096;
+                font-size: 13px;
+            }
+
+            QFrame#form_card {
+                background-color: white;
+                border: 1px solid #E1E8EF;
+                border-radius: 12px;
+            }
+
+            QLabel {
+                color: #526779;
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            QLineEdit,
+            QComboBox {
+                background-color: white;
+                border: 1px solid #CBD5E0;
+                border-radius: 7px;
+                padding: 9px 10px;
+                min-height: 20px;
+                color: #0B3B82;
+                font-size: 13px;
+            }
+
+            QLineEdit:focus,
+            QComboBox:focus {
+                border: 1px solid #0B3B82;
+            }
+
+            QPushButton {
+                border: none;
+                border-radius: 7px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 600;
+                min-width: 90px;
+            }
+
+            QPushButton#cancel_button {
+                background-color: #EDF2F7;
+                color: #526779;
+            }
+
+            QPushButton#cancel_button:hover {
+                background-color: #E2E8F0;
+            }
+
+            QPushButton#save_button {
+                background-color: #00C853;
+                color: white;
+            }
+
+            QPushButton#save_button:hover {
+                background-color: #00B048;
+            }
+
+            QPushButton#save_button:pressed {
+                background-color: #00963E;
+            }
+        """)
+
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(28, 24, 28, 24)
+        main_layout.setSpacing(18)
+
+        title = QLabel("Staff details")
+        title.setObjectName("title")
+
+        description = QLabel(
+            "Register a staff member and assign their duty rotation."
+        )
+        description.setObjectName("description")
+
+        main_layout.addWidget(title)
+        main_layout.addWidget(description)
+
+        form_card = QFrame()
+        form_card.setObjectName("form_card")
+
+        form_layout = QFormLayout()
+        form_layout.setContentsMargins(22, 22, 22, 22)
+        form_layout.setHorizontalSpacing(18)
+        form_layout.setVerticalSpacing(16)
 
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Enter nurse name")
+        self.name_input.setPlaceholderText("Enter full name")
 
         self.staff_id_input = QLineEdit()
-        self.staff_id_input.setPlaceholderText("Enter Staff ID")
+        self.staff_id_input.setReadOnly(True)
+        self.staff_id_input.setPlaceholderText(
+            "Assigned automatically on registration"
+        )
+        self.staff_id_input.setText(
+            self.nurse[2] if self.nurse is not None else "Assigned on save"
+        )
+
+        self.unit_input = QLineEdit()
+        self.unit_input.setPlaceholderText(
+            "e.g. Emergency, Laboratory, Facilities"
+        )
 
         self.phone_input = QLineEdit()
         self.phone_input.setPlaceholderText("Enter phone number")
@@ -39,22 +155,68 @@ class NurseForm(QDialog):
         self.status_input = QComboBox()
         self.status_input.addItems(["Active", "Inactive"])
 
+        self.staff_type_input = QComboBox()
+        self.staff_type_input.addItems(
+            ["Admin", "Janitor", "Front Desk", "Nurse", "Lab Tech", "Doctor"]
+        )
+
         self.rotation_input = QComboBox()
 
-        self.rotation_input.addItem("Rotation 1 (M M N N O O)", 0)
-        self.rotation_input.addItem("Rotation 2 (N N O O M M)", 1)
-        self.rotation_input.addItem("Rotation 3 (O O M M N N)", 2)
+        self.rotation_input.addItem(
+            "Rotation 1 (M M N N O O)",
+            0,
+        )
+        self.rotation_input.addItem(
+            "Rotation 2 (N N O O M M)",
+            1,
+        )
+        self.rotation_input.addItem(
+            "Rotation 3 (O O M M N N)",
+            2,
+        )
 
-        layout.addRow("Name:", self.name_input)
-        layout.addRow("Staff ID:", self.staff_id_input)
-        layout.addRow("Phone:", self.phone_input)
-        layout.addRow("Status:", self.status_input)
-        layout.addRow("Rotation:", self.rotation_input)
+        self.photo_preview = QLabel("No profile picture")
+        self.photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.photo_preview.setFixedSize(112, 112)
+        self.photo_preview.setStyleSheet(
+            "background: #F2F4F7; border: 1px solid #D0D5DD; "
+            "border-radius: 56px; color: #667085;"
+        )
+        self.photo_button = QPushButton("Choose picture")
+        self.photo_button.clicked.connect(self.choose_profile_photo)
+        self.remove_photo_button = QPushButton("Remove picture")
+        self.remove_photo_button.clicked.connect(self.clear_profile_photo)
+        photo_actions = QVBoxLayout()
+        photo_actions.addWidget(self.photo_button)
+        photo_actions.addWidget(self.remove_photo_button)
+        photo_row = QHBoxLayout()
+        photo_row.addWidget(self.photo_preview)
+        photo_row.addLayout(photo_actions)
+        photo_row.addStretch()
+
+        form_layout.addRow("Name", self.name_input)
+        form_layout.addRow("Staff ID", self.staff_id_input)
+        form_layout.addRow("Staff type", self.staff_type_input)
+        form_layout.addRow("Unit", self.unit_input)
+        form_layout.addRow("Phone", self.phone_input)
+        form_layout.addRow("Status", self.status_input)
+        form_layout.addRow("Rotation", self.rotation_input)
+        form_layout.addRow("Profile picture", photo_row)
+
+        form_card.setLayout(form_layout)
+
+        main_layout.addWidget(form_card)
 
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+
+        button_layout.addStretch()
 
         self.cancel_button = QPushButton("Cancel")
-        self.save_button = QPushButton("Save")
+        self.cancel_button.setObjectName("cancel_button")
+
+        self.save_button = QPushButton("Save Staff Member")
+        self.save_button.setObjectName("save_button")
 
         self.cancel_button.clicked.connect(self.reject)
         self.save_button.clicked.connect(self.save)
@@ -62,9 +224,9 @@ class NurseForm(QDialog):
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.save_button)
 
-        layout.addRow(button_layout)
+        main_layout.addLayout(button_layout)
 
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
     def load_nurse(self):
         self.name_input.setText(self.nurse[1])
@@ -86,26 +248,105 @@ class NurseForm(QDialog):
             if rotation_index >= 0:
                 self.rotation_input.setCurrentIndex(rotation_index)
 
+        staff_type = self.nurse[6] if len(self.nurse) > 6 else "Nurse"
+        staff_type_index = self.staff_type_input.findText(staff_type)
+        if staff_type_index >= 0:
+            self.staff_type_input.setCurrentIndex(staff_type_index)
+        self.unit_input.setText(self.nurse[7] if len(self.nurse) > 7 else "")
+        if len(self.nurse) > 8 and self.nurse[8]:
+            self.show_profile_photo(self.nurse[8])
+
+    def choose_profile_photo(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose staff profile picture",
+            "",
+            "Image files (*.png *.jpg *.jpeg *.bmp *.webp)",
+        )
+        if not file_path:
+            return
+
+        reader = QImageReader(file_path)
+        reader.setAutoTransform(True)
+        image = reader.read()
+        if image.isNull():
+            QMessageBox.warning(
+                self,
+                "Invalid picture",
+                f"Could not read this image:\n{reader.errorString()}",
+            )
+            return
+
+        image = image.scaled(
+            512,
+            512,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        encoded = QByteArray()
+        buffer = QBuffer(encoded)
+        if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+            QMessageBox.critical(
+                self,
+                "Picture error",
+                "Could not prepare the selected picture.",
+            )
+            return
+        saved = image.save(buffer, "JPEG", 82)
+        buffer.close()
+        if not saved:
+            QMessageBox.warning(
+                self,
+                "Picture error",
+                "Could not convert the selected picture to JPEG.",
+            )
+            return
+
+        self.profile_photo = bytes(encoded)
+        self.remove_profile_photo = False
+        self.show_profile_photo(self.profile_photo)
+
+    def show_profile_photo(self, photo_bytes):
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(photo_bytes):
+            self.photo_preview.setText("Picture unavailable")
+            return
+        self.photo_preview.setPixmap(
+            pixmap.scaled(
+                self.photo_preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.photo_preview.setStyleSheet(
+            "background: #F2F4F7; border: 1px solid #D0D5DD; "
+            "border-radius: 56px;"
+        )
+
+    def clear_profile_photo(self):
+        self.profile_photo = None
+        self.remove_profile_photo = self.nurse is not None
+        self.photo_preview.setPixmap(QPixmap())
+        self.photo_preview.setText("No profile picture")
+
     def save(self):
         name = self.name_input.text().strip()
-        staff_id = self.staff_id_input.text().strip()
-
         if not name:
             QMessageBox.warning(
                 self,
-                "Invalid Nurse",
-                "Please enter the nurse's name.",
+                "Invalid Staff Member",
+                "Please enter the staff member's name.",
             )
             self.name_input.setFocus()
             return
 
-        if not staff_id:
+        if not self.unit_input.text().strip():
             QMessageBox.warning(
                 self,
-                "Invalid Nurse",
-                "Please enter a Staff ID.",
+                "Invalid Staff Member",
+                "Please enter the staff member's unit.",
             )
-            self.staff_id_input.setFocus()
+            self.unit_input.setFocus()
             return
 
         self.accept()
@@ -113,8 +354,12 @@ class NurseForm(QDialog):
     def get_data(self):
         return {
             "name": self.name_input.text().strip(),
-            "staff_id": self.staff_id_input.text().strip(),
+            "staff_id": self.nurse[2] if self.nurse is not None else "",
             "phone": self.phone_input.text().strip(),
             "status": self.status_input.currentText(),
             "rotation_position": self.rotation_input.currentData(),
+            "staff_type": self.staff_type_input.currentText(),
+            "unit": self.unit_input.text().strip(),
+            "profile_photo": self.profile_photo,
+            "remove_profile_photo": self.remove_profile_photo,
         }

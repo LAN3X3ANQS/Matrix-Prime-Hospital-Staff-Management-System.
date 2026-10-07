@@ -136,7 +136,8 @@ def get_leave_records(
                 leave_records.start_date,
                 leave_records.end_date,
                 leave_records.reason,
-                leave_records.status
+                leave_records.status,
+                nurses.staff_type
             FROM leave_records
             INNER JOIN nurses
                 ON leave_records.nurse_id = nurses.id
@@ -158,7 +159,8 @@ def get_leave_records(
                 leave_records.start_date,
                 leave_records.end_date,
                 leave_records.reason,
-                leave_records.status
+                leave_records.status,
+                nurses.staff_type
             FROM leave_records
             INNER JOIN nurses
                 ON leave_records.nurse_id = nurses.id
@@ -239,3 +241,29 @@ def delete_leave_record(record_id):
     connection.close()
 
     return deleted
+
+
+def _enable_remote_access():
+    from functools import wraps
+
+    from networking.config import is_remote_client
+    from networking.transport import remote_call
+
+    for function_name in (
+        "create_leave_record",
+        "get_leave_records",
+        "update_leave_record",
+        "delete_leave_record",
+    ):
+        local_function = globals()[function_name]
+
+        @wraps(local_function)
+        def routed(*args, __name=function_name, __local=local_function, **kwargs):
+            if is_remote_client():
+                return remote_call("records.leave_records", __name, args, kwargs)
+            return __local(*args, **kwargs)
+
+        globals()[function_name] = routed
+
+
+_enable_remote_access()

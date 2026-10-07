@@ -187,6 +187,7 @@ def get_attendance_summary(
             "nurse_id": nurse_id,
             "name": nurse[1],
             "staff_id": nurse[2],
+            "staff_type": nurse[6],
             "scheduled_shifts": scheduled,
             "present": nurse_present,
             "absent": nurse_absent,
@@ -198,10 +199,95 @@ def get_attendance_summary(
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "total_nurses": len(nurses),
+        "total_staff": len(nurses),
         "scheduled_shifts": scheduled_shifts,
         "present": present,
         "absent": absent,
         "approved_leave": approved_leave,
         "attendance_rate": attendance_rate,
         "nurses": nurse_summaries
+    }
+
+
+def get_staff_attendance_score(staff_record_id, as_of=None):
+    as_of = as_of or date.today()
+    start_date = as_of - timedelta(days=29)
+    staff = next(
+        (
+            person
+            for person in get_active_nurses()
+            if person[0] == staff_record_id
+        ),
+        None,
+    )
+    if staff is None:
+        raise ValueError("The selected staff member is not active.")
+
+    scheduled_days = (
+        (as_of - start_date).days + 1
+    )
+    roster = generate_roster(
+        [staff],
+        start_date,
+        scheduled_days,
+    )
+    scheduled_shifts = {
+        day["date"]: day["nurses"][0]["shift"]
+        for day in roster
+        if day["nurses"][0]["shift"] != "Off"
+    }
+    leave_records = get_leave_records(
+        start_date.isoformat(),
+        as_of.isoformat(),
+    )
+    approved_leave_dates = set()
+    for record in leave_records:
+        if record[1] != staff_record_id or record[7] != "Approved":
+            continue
+        leave_date = date.fromisoformat(record[4])
+        leave_end = date.fromisoformat(record[5])
+        while leave_date <= leave_end:
+            if start_date <= leave_date <= as_of:
+                approved_leave_dates.add(leave_date)
+            leave_date += timedelta(days=1)
+
+    approved_leave_shifts = len(
+        set(scheduled_shifts).intersection(approved_leave_dates)
+    )
+    scheduled_dates = set(scheduled_shifts)
+    scheduled_dates.difference_update(approved_leave_dates)
+    attendance = get_attendance_by_date_range(
+        start_date.isoformat(),
+        as_of.isoformat(),
+    )
+    staff_records = [
+        record
+        for record in attendance
+        if record[1] == staff_record_id
+        and date.fromisoformat(record[4]) in scheduled_shifts
+        and record[8] == scheduled_shifts[date.fromisoformat(record[4])]
+    ]
+    on_time = sum(record[6] == "Present" for record in staff_records)
+    late = sum(record[6] == "Late" for record in staff_records)
+    completed_sign_outs = sum(record[9] is not None for record in staff_records)
+    eligible_shifts = len(scheduled_dates)
+    score = (
+        round(on_time / eligible_shifts * 100)
+        if eligible_shifts
+        else None
+    )
+    return {
+        "score": score,
+        "period_start": start_date,
+        "period_end": as_of,
+        "scheduled_shifts": eligible_shifts,
+        "on_time_check_ins": on_time,
+        "late_check_ins": late,
+        "absent_shifts": max(
+            eligible_shifts - on_time - late,
+            0,
+        ),
+        "completed_sign_outs": completed_sign_outs,
+        "approved_leave_shifts": approved_leave_shifts,
+        "is_consistent": score is not None and score >= 90,
     }

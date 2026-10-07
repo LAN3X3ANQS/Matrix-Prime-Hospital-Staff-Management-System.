@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 
 ROTATION = [
@@ -9,6 +9,8 @@ ROTATION = [
     "Off",
     "Off"
 ]
+
+ROTATION_ANCHOR = date(2026, 10, 5)
 
 
 def get_shift_for_day(rotation_start, day):
@@ -37,7 +39,7 @@ def generate_roster(nurses, start_date, number_of_days):
                 rotation_position = 0
 
             nurse_start_date = (
-                start_date
+                ROTATION_ANCHOR
                 - timedelta(days=rotation_position * 2)
             )
 

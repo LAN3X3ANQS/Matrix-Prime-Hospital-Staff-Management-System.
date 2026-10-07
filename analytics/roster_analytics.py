@@ -34,6 +34,7 @@ def get_roster_summary(start_date, end_date):
             "nurse_id": nurse[0],
             "name": nurse[1],
             "staff_id": nurse[2],
+            "staff_type": nurse[6],
             "morning": 0,
             "night": 0,
             "off": 0
@@ -68,6 +69,7 @@ def get_roster_summary(start_date, end_date):
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "total_nurses": len(nurses),
+        "total_staff": len(nurses),
         "total_days": number_of_days,
         "total_shifts": (
             shift_counts["Morning"]
