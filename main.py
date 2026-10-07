@@ -4,6 +4,7 @@ from database.database import initialize_database
 from ui.login_window import LoginWindow
 from ui.main_window import MainWindow
 from ui.network_setup_dialog import NetworkSetupDialog
+from ui.app_icon import get_app_icon
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -59,6 +60,7 @@ class ApplicationController:
 
 def main():
     app = QApplication([])
+    app.setWindowIcon(get_app_icon())
     setup = NetworkSetupDialog()
     if not setup.exec():
         return

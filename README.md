@@ -18,8 +18,11 @@ runtime with the app:
 
 ```powershell
 python -m pip install pyinstaller
-pyinstaller --noconfirm --windowed --name MatrixPrimeHospital --collect-all cryptography main.py
+pyinstaller --noconfirm --windowed --onefile --name MatrixPrimeHospital --icon assets\matrix-prime-hospital.ico --collect-all cryptography main.py
 ```
+
+The executable and app windows use the Matrix Prime Hospital blue-and-white
+“M” icon with a green medical-cross tile.
 
 Test the executable on the intended server and workstation computers before
 distribution. The server computer's Windows firewall must permit the app's
