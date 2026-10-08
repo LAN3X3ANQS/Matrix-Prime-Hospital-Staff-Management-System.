@@ -1,3 +1,4 @@
+import hashlib
 import os
 import tempfile
 import unittest
@@ -85,6 +86,8 @@ class LanNetworkingTests(unittest.TestCase):
             database.authenticate("TestAdminPassword_2026!"),
             "ADMIN",
         )
+        with self.assertRaises(ValueError):
+            create_backup(self.database_path)
 
         staff = Staff(None, "Morgan Nurse", "", "")
         database.add_staff(
@@ -111,9 +114,30 @@ class LanNetworkingTests(unittest.TestCase):
 
         backup_path = Path(self.temporary_directory.name) / "shared-backup.sqlite3"
         create_backup(backup_path)
+        workstation = self.server.get_paired_workstations()[0]
+        self.assertTrue(workstation["backup_complete"])
+        self.assertEqual(workstation["backup_progress"], 100)
         database.deactivate_staff(result[0][0])
+        workstation = self.server.get_paired_workstations()[0]
+        self.assertFalse(workstation["backup_complete"])
+        self.assertEqual(workstation["backup_progress"], 0)
         restore_backup(backup_path)
         self.assertEqual(database.get_active_staff()[0][1], "Morgan Nurse")
+
+    def test_admin_can_block_and_unblock_a_paired_workstation(self):
+        network_transport.pair_with_server(self.server.pairing_code)
+        config = network_config.get_client_config()
+        client_digest = hashlib.sha256(
+            config["client_key"].encode("utf-8")
+        ).hexdigest()
+
+        self.server.set_workstation_blocked(client_digest, True)
+        self.assertFalse(network_server._client_allowed(config["client_key"]))
+        with self.assertRaises(PermissionError):
+            network_transport.remote_login("TestAdminPassword_2026!")
+
+        self.server.set_workstation_blocked(client_digest, False)
+        self.assertTrue(network_server._client_allowed(config["client_key"]))
 
     def test_staff_session_is_blocked_from_admin_directory_reads(self):
         database.add_staff(
@@ -134,6 +158,8 @@ class LanNetworkingTests(unittest.TestCase):
         visible_staff = database.get_active_staff()
         self.assertEqual(visible_staff[0][3], "")
         self.assertIsNone(visible_staff[0][8])
+        with self.assertRaises(PermissionError):
+            network_transport.remote_server_call("get_paired_workstations")
 
 
 if __name__ == "__main__":

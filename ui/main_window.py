@@ -15,6 +15,7 @@ from ui.attendance_view import AttendanceView
 from ui.dashboard_view import DashboardView
 from ui.data_tools_view import DataToolsView
 from ui.export_view import ExportView
+from ui.help_view import HelpView
 from ui.leave_records_view import LeaveRecordsView
 from ui.nurses_view import NursesView
 from ui.reports_view import ReportsView
@@ -49,8 +50,9 @@ class MainWindow(QMainWindow):
         "leave": ("Leave records", "Manage staff leave and absence records"),
         "shifts": ("Shift changes", "Track updates to scheduled shifts"),
         "exports": ("Exports", "Export operational data to a file"),
-        "settings": ("Settings", "Manage shared application passwords"),
+        "settings": ("Settings", "Manage passwords, workstations, and server handoff"),
         "data_tools": ("Data & backups", "Back up or restore this computer's database"),
+        "help": ("Help", "Quick-start guidance, troubleshooting, and support"),
     }
 
     def __init__(self, role, lan_server=None):
@@ -116,6 +118,9 @@ class MainWindow(QMainWindow):
             sidebar_layout.addWidget(self.create_section_label("SYSTEM"))
             self.add_navigation_button(sidebar_layout, "data_tools", "Data & backups")
             self.add_navigation_button(sidebar_layout, "settings", "Settings")
+        sidebar_layout.addSpacing(14)
+        sidebar_layout.addWidget(self.create_section_label("SUPPORT"))
+        self.add_navigation_button(sidebar_layout, "help", "Help")
         sidebar_layout.addStretch()
         if self.lan_server is not None:
             status_text = "SHARED LAN SERVER\nThis computer hosts the database"
@@ -188,6 +193,7 @@ class MainWindow(QMainWindow):
             "roster": RosterView,
             "attendance": AttendanceView,
             "history": AttendanceHistoryView,
+            "help": lambda: HelpView(self.role),
         }
         if self.role == "ADMIN":
             factories.update({

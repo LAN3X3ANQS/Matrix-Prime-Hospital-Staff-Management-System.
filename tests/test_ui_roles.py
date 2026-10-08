@@ -49,15 +49,23 @@ class RoleUiTests(unittest.TestCase):
             )
             self.assertIn("settings", admin_window.pages_by_key)
             self.assertIn("data_tools", admin_window.pages_by_key)
+            self.assertIn("help", admin_window.pages_by_key)
             self.assertEqual(
                 set(staff_window.pages_by_key),
-                {"dashboard", "roster", "attendance", "history"},
+                {"dashboard", "roster", "attendance", "history", "help"},
             )
+            self.assertIn("help", admin_window.navigation_buttons)
+            self.assertIn("help", staff_window.navigation_buttons)
 
             staff_window.show_settings()
             self.assertEqual(
                 staff_window.pages.currentWidget(),
                 staff_window.pages_by_key["dashboard"],
+            )
+            staff_window.open_page("help")
+            self.assertEqual(
+                staff_window.pages.currentWidget(),
+                staff_window.pages_by_key["help"],
             )
         finally:
             admin_window.close()

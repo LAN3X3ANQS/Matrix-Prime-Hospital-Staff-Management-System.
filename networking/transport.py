@@ -224,3 +224,12 @@ def remote_backup(action, data=None):
         {"action": action, "data": data},
     )
     return result
+
+
+def remote_server_call(function, args=(), kwargs=None):
+    return remote_call(
+        "networking.server",
+        function,
+        args,
+        kwargs or {},
+    )

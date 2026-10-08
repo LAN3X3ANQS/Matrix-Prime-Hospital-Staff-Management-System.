@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+import hashlib
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -5,11 +8,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 from database.database import change_password, get_pending_password_roles
+from networking.config import get_client_config
+from networking.transport import remote_server_call
 from PySide6.QtWidgets import QInputDialog
 
 
@@ -17,6 +24,7 @@ class SettingsView(QWidget):
     def __init__(self, parent=None, lan_server=None):
         super().__init__(parent)
         self.lan_server = lan_server
+        self.is_remote_client = self.lan_server is None and get_client_config() is not None
         self.initial_setup_pending = bool(get_pending_password_roles())
         self.setup_ui()
 
@@ -48,7 +56,7 @@ class SettingsView(QWidget):
         ):
             layout.addWidget(self.create_password_card(role, title, detail))
 
-        if self.lan_server is not None:
+        if self.lan_server is not None or self.is_remote_client:
             layout.addWidget(self.create_network_card())
 
         layout.addStretch()
@@ -114,25 +122,220 @@ class SettingsView(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(10)
-        title = QLabel("Shared LAN server")
+        title = QLabel("Connected workstations")
         title.setObjectName("password_title")
         detail = QLabel(
-            "Generate a short-lived workstation pairing code or revoke all "
-            "currently paired workstations."
+            "Backups are complete only when the workstation has a verified "
+            "copy of the current server database. A data change makes older "
+            "copies out of date."
         )
         detail.setObjectName("password_detail")
         detail.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(detail)
         actions = QHBoxLayout()
-        pairing_button = QPushButton("Generate pairing code")
-        pairing_button.clicked.connect(self.show_pairing_code)
-        revoke_button = QPushButton("Revoke all workstations")
-        revoke_button.clicked.connect(self.revoke_workstations)
-        actions.addWidget(pairing_button)
-        actions.addWidget(revoke_button)
+        self.refresh_workstations_button = QPushButton("Refresh")
+        self.refresh_workstations_button.clicked.connect(self.refresh_workstations)
+        actions.addWidget(self.refresh_workstations_button)
+        if self.lan_server is not None:
+            pairing_button = QPushButton("Generate pairing code")
+            pairing_button.clicked.connect(self.show_pairing_code)
+            revoke_button = QPushButton("Revoke all workstations")
+            revoke_button.clicked.connect(self.revoke_workstations)
+            actions.addWidget(pairing_button)
+            actions.addWidget(revoke_button)
         layout.addLayout(actions)
+        self.workstation_scroll = QScrollArea()
+        self.workstation_scroll.setWidgetResizable(True)
+        self.workstation_scroll.setMaximumHeight(350)
+        self.workstation_container = QWidget()
+        self.workstation_list = QVBoxLayout(self.workstation_container)
+        self.workstation_list.setContentsMargins(0, 0, 0, 0)
+        self.workstation_list.setSpacing(8)
+        self.workstation_scroll.setWidget(self.workstation_container)
+        layout.addWidget(self.workstation_scroll)
+        self.refresh_workstations()
         return card
+
+    def refresh_workstations(self):
+        try:
+            if self.lan_server is not None:
+                workstations = self.lan_server.get_paired_workstations()
+            else:
+                workstations = remote_server_call("get_paired_workstations")
+        except (ConnectionError, OSError, PermissionError, RuntimeError, ValueError) as error:
+            QMessageBox.warning(
+                self,
+                "Could not load workstations",
+                f"The server could not return its workstation list:\n{error}",
+            )
+            return
+
+        while self.workstation_list.count():
+            item = self.workstation_list.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if self.lan_server is not None:
+            self.workstation_list.addWidget(
+                self.create_workstation_row(
+                    {"name": "This computer", "is_server": True}
+                )
+            )
+        current_client_id = None
+        if self.is_remote_client:
+            config = get_client_config()
+            current_client_id = hashlib.sha256(
+                config["client_key"].encode("utf-8")
+            ).hexdigest()
+        for workstation in workstations:
+            workstation["is_current"] = workstation["id"] == current_client_id
+            self.workstation_list.addWidget(
+                self.create_workstation_row(workstation)
+            )
+        if not workstations:
+            empty = QLabel("No workstations are paired with this server yet.")
+            empty.setObjectName("password_detail")
+            self.workstation_list.addWidget(empty)
+        self.workstation_list.addStretch()
+
+    def create_workstation_row(self, workstation):
+        row = QFrame()
+        row.setObjectName("password_card")
+        layout = QVBoxLayout(row)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(7)
+
+        name_row = QHBoxLayout()
+        name = QLabel(workstation["name"])
+        name.setObjectName("password_title")
+        name_row.addWidget(name)
+        name_row.addStretch()
+        if workstation.get("is_server"):
+            status = "BASE SERVER"
+        elif workstation.get("blocked"):
+            status = "BLOCKED"
+        elif workstation.get("is_current"):
+            status = "THIS PC"
+        else:
+            status = "PAIRED"
+        status_label = QLabel(status)
+        status_label.setObjectName("password_detail")
+        name_row.addWidget(status_label)
+        layout.addLayout(name_row)
+
+        if not workstation.get("is_server"):
+            progress = QProgressBar()
+            progress.setRange(0, 100)
+            progress.setValue(workstation.get("backup_progress", 0))
+            progress.setFormat("%p% of current server backup")
+            layout.addWidget(progress)
+
+            last_backup = workstation.get("backup_completed_at")
+            if workstation.get("backup_complete"):
+                backup_status = f"Complete · {self.format_timestamp(last_backup)}"
+            elif last_backup:
+                backup_status = (
+                    f"Out of date · last saved {self.format_timestamp(last_backup)}"
+                )
+            else:
+                backup_status = "No verified backup of the current data"
+            backup_label = QLabel(backup_status)
+            backup_label.setObjectName("password_detail")
+            layout.addWidget(backup_label)
+
+            last_seen = workstation.get("last_seen")
+            seen_label = QLabel(
+                f"Last active: {self.format_timestamp(last_seen)}"
+                if last_seen
+                else "Last active: unknown"
+            )
+            seen_label.setObjectName("password_detail")
+            layout.addWidget(seen_label)
+
+            actions = QHBoxLayout()
+            actions.addStretch()
+            if workstation.get("backup_complete") and not workstation.get("blocked"):
+                promote_button = QPushButton("Prepare host migration")
+                promote_button.clicked.connect(
+                    lambda checked=False, item=dict(workstation):
+                    self.show_migration_steps(item)
+                )
+                actions.addWidget(promote_button)
+            if not workstation.get("is_current"):
+                blocked = workstation.get("blocked", False)
+                access_button = QPushButton(
+                    "Unblock PC" if blocked else "Block PC"
+                )
+                access_button.clicked.connect(
+                    lambda checked=False, item=dict(workstation), value=not blocked:
+                    self.set_workstation_blocked(item, value)
+                )
+                actions.addWidget(access_button)
+            layout.addLayout(actions)
+        return row
+
+    @staticmethod
+    def format_timestamp(value):
+        if not value:
+            return "unknown"
+        try:
+            timestamp = datetime.fromisoformat(value)
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            return timestamp.astimezone().strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            return "unknown"
+
+    def set_workstation_blocked(self, workstation, blocked):
+        name = workstation.get("name", "this workstation")
+        if blocked:
+            confirmation = QMessageBox.warning(
+                self,
+                "Block workstation?",
+                f"{name} will be disconnected immediately and will not be able "
+                "to sign in until an Admin unblocks it.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if confirmation != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            if self.lan_server is not None:
+                self.lan_server.set_workstation_blocked(
+                    workstation["id"],
+                    blocked,
+                )
+            else:
+                remote_server_call(
+                    "set_workstation_blocked",
+                    (workstation["id"], blocked),
+                )
+        except (ConnectionError, OSError, PermissionError, RuntimeError, ValueError) as error:
+            QMessageBox.critical(
+                self,
+                "Workstation access not updated",
+                f"{name} could not be updated:\n{error}",
+            )
+            return
+        self.refresh_workstations()
+
+    def show_migration_steps(self, workstation):
+        QMessageBox.information(
+            self,
+            "Prepare base-server change",
+            f"{workstation['name']} has a verified backup of the current "
+            "server data. To complete the change safely:\n\n"
+            "1. On that PC, close the app and start it again.\n"
+            "2. Choose “Make this computer the shared server”.\n"
+            "3. Sign in as Admin, open Data & backups, and restore the "
+            "verified backup saved on that PC.\n"
+            "4. Pair each workstation to the new server using its new "
+            "pairing code.\n\n"
+            "Keep the current server running until the backup is restored. "
+            "After confirming the new server works, close the old server.",
+        )
 
     def show_pairing_code(self):
         pairing_code = self.lan_server.create_pairing_code()

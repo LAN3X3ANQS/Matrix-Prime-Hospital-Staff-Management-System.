@@ -18,7 +18,12 @@ runtime with the app:
 
 ```powershell
 python -m pip install pyinstaller
-pyinstaller --noconfirm --windowed --onefile --name MatrixPrimeHospital --icon assets\matrix-prime-hospital.ico --collect-all cryptography main.py
+pyinstaller --noconfirm --windowed --onefile `
+  --name MatrixPrimeHospital `
+  --icon assets\matrix-prime-hospital.ico `
+  --add-data "assets\matrix-prime-hospital.ico;assets" `
+  --collect-all cryptography `
+  main.py
 ```
 
 The executable and app windows use the Matrix Prime Hospital blue-and-white
@@ -84,6 +89,15 @@ This provides LAN sharing only; it does not connect remote US and Nigeria
 locations over the internet. A VPN or centrally hosted service would be needed
 for that and requires separate hospital approval.
 
+Admins can use **Settings** on the server or a paired workstation to review
+paired PCs, block or unblock a workstation, and check whether its locally
+saved backup matches the current server database. Each workstation must create
+a backup from **Data & backups**; any server data changes make that backup
+out of date. A PC with a complete backup can be selected to prepare a base
+server change. The handoff is coordinated: start that PC in shared-server
+mode, restore its saved backup, then pair the remaining PCs to the new server
+with its pairing code. Settings does not remotely start another PC's server.
+
 Data & backups can create and restore full database backup files. In shared
 mode, backups are created from and restored to the server database. Backup
 files contain staff data, profile pictures, attendance, and password hashes;
@@ -95,6 +109,9 @@ before restoring a shared backup.
 
 ## Access
 
+- The **Help** page is available to Admin and Staff and includes quick-start
+  guidance, workspace instructions, common troubleshooting steps, version
+  information, and where to request hospital support.
 - **Admin** has access to every workspace, including staff management,
   analytics, reports, leave and shift records, exports, and password settings.
 - **Staff** has access to the dashboard, roster, attendance sign-in/sign-out, and

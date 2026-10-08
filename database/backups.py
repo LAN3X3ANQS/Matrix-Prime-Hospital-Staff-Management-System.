@@ -1,4 +1,5 @@
 from contextlib import closing
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -15,6 +16,9 @@ REQUIRED_TABLES = {
 
 def create_backup(destination):
     destination = Path(destination)
+    if destination.resolve() == DATABASE_PATH.resolve():
+        raise ValueError("Choose a different location for the backup file.")
+
     from networking.config import is_remote_client
 
     if is_remote_client():
@@ -37,10 +41,29 @@ def create_backup(destination):
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
             raise
+        digest = hashlib.sha256()
+        backup_size = 0
+        with destination.open("rb") as backup_file:
+            for chunk in iter(lambda: backup_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+                backup_size += len(chunk)
+        database_digest = hashlib.sha256(payload).hexdigest()
+        if backup_size != len(payload) or digest.hexdigest() != database_digest:
+            raise OSError("The saved backup does not match the server snapshot.")
+        try:
+            remote_backup(
+                "complete",
+                {
+                    "digest": database_digest,
+                    "size": backup_size,
+                },
+            )
+        except (ConnectionError, OSError, RuntimeError, ValueError) as error:
+            raise RuntimeError(
+                f"The backup was saved to {destination}, but the server "
+                "could not verify its completion."
+            ) from error
         return destination
-
-    if destination.resolve() == DATABASE_PATH.resolve():
-        raise ValueError("Choose a different location for the backup file.")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None

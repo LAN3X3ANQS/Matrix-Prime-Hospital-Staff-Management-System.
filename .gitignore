@@ -12,6 +12,7 @@ env/
 build/
 dist/
 *.spec
+!MPH-NMS.spec
 .vscode/
 .DS_Store
 Thumbs.db

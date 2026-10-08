@@ -89,6 +89,13 @@ RPC_METHODS = {
         "create_shift_record", "get_shift_records", "update_shift_record",
         "delete_shift_record",
     )
+} | {
+    ("networking.server", name)
+    for name in ("get_paired_workstations", "set_workstation_blocked")
+}
+ADMIN_ONLY |= {
+    ("networking.server", "get_paired_workstations"),
+    ("networking.server", "set_workstation_blocked"),
 }
 
 
@@ -226,10 +233,108 @@ def _client_allowed(client_key):
     if not isinstance(client_key, str) or len(client_key) < 32:
         return False
     digest = hashlib.sha256(client_key.encode("utf-8")).hexdigest()
-    return any(
-        hmac.compare_digest(digest, stored)
-        for stored in _paired_clients
-    )
+    with _lock:
+        return any(
+            hmac.compare_digest(digest, stored)
+            and not details.get("blocked", False)
+            for stored, details in _paired_clients.items()
+        )
+
+
+def _database_backup_details():
+    from database.backups import create_backup
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "current-database.sqlite3"
+        with server_request_context():
+            create_backup(path)
+        payload = path.read_bytes()
+    return hashlib.sha256(payload).hexdigest(), len(payload)
+
+
+def _record_workstation_backup(client_digest, database_digest, backup_bytes):
+    if (
+        not isinstance(database_digest, str)
+        or len(database_digest) != 64
+        or any(character not in "0123456789abcdef" for character in database_digest)
+        or not isinstance(backup_bytes, int)
+        or backup_bytes <= 0
+    ):
+        raise ValueError("The workstation backup details are invalid.")
+
+    with _lock:
+        details = _paired_clients.get(client_digest)
+        if details is None or details.get("blocked", False):
+            raise PermissionError("This workstation is not paired with the server.")
+        previous = dict(details)
+        details["backup_digest"] = database_digest
+        details["backup_bytes"] = backup_bytes
+        details["backup_completed_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            _persist_clients()
+        except OSError:
+            details.clear()
+            details.update(previous)
+            raise
+
+
+def _set_workstation_blocked(client_digest, blocked):
+    if (
+        not isinstance(client_digest, str)
+        or len(client_digest) != 64
+        or any(character not in "0123456789abcdef" for character in client_digest)
+        or not isinstance(blocked, bool)
+    ):
+        raise ValueError("The workstation selection is invalid.")
+    with _lock:
+        details = _paired_clients.get(client_digest)
+        if details is None:
+            raise ValueError("That workstation is no longer paired.")
+        previous = details.get("blocked", False)
+        details["blocked"] = blocked
+        try:
+            _persist_clients()
+        except OSError:
+            details["blocked"] = previous
+            raise
+        if blocked:
+            for token, session in list(_sessions.items()):
+                if hmac.compare_digest(session["client_digest"], client_digest):
+                    _sessions.pop(token, None)
+
+
+def _get_paired_workstations():
+    database_digest, database_bytes = _database_backup_details()
+    with _lock:
+        clients = [
+            (digest, dict(details))
+            for digest, details in _paired_clients.items()
+        ]
+
+    workstations = []
+    for digest, details in clients:
+        backup_complete = details.get("backup_digest") == database_digest
+        workstations.append({
+            "id": digest,
+            "name": details.get("name", "Workstation"),
+            "paired_at": details.get("paired_at"),
+            "last_seen": details.get("last_seen"),
+            "blocked": bool(details.get("blocked", False)),
+            "backup_completed_at": details.get("backup_completed_at"),
+            "backup_bytes": details.get("backup_bytes", 0),
+            "current_database_bytes": database_bytes,
+            "backup_progress": 100 if backup_complete else 0,
+            "backup_complete": backup_complete,
+        })
+    return workstations
+
+
+def get_paired_workstations():
+    return _get_paired_workstations()
+
+
+def set_workstation_blocked(client_digest, blocked):
+    _set_workstation_blocked(client_digest, blocked)
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -309,9 +414,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             client_key = secrets.token_urlsafe(32)
             digest = hashlib.sha256(client_key.encode("utf-8")).hexdigest()
+            paired_at = datetime.now(timezone.utc).isoformat()
             _paired_clients[digest] = {
                 "name": str(request.get("client_name", "Workstation"))[:120],
-                "paired_at": datetime.now(timezone.utc).isoformat(),
+                "paired_at": paired_at,
+                "last_seen": paired_at,
+                "blocked": False,
             }
             try:
                 _persist_clients()
@@ -326,11 +434,15 @@ class _Handler(BaseHTTPRequestHandler):
         if not _client_allowed(client_key):
             self._reply(403, error="This workstation is not paired with the server.")
             return None
+        client_digest = hashlib.sha256(client_key.encode("utf-8")).hexdigest()
+        with _lock:
+            client = _paired_clients.get(client_digest)
+            if client is not None:
+                client["last_seen"] = datetime.now(timezone.utc).isoformat()
         if not require_session:
             return None
         session = self.headers.get("X-MPH-Session", "")
         entry = _sessions.get(session)
-        client_digest = hashlib.sha256(client_key.encode("utf-8")).hexdigest()
         if (
             not entry
             or entry["expires"] < time.monotonic()
@@ -397,6 +509,16 @@ class _Handler(BaseHTTPRequestHandler):
                     with server_request_context():
                         create_backup(path)
                     result = path.read_bytes()
+            elif action == "complete":
+                details = request.get("data")
+                if not isinstance(details, dict):
+                    raise ValueError("The workstation backup details are invalid.")
+                _record_workstation_backup(
+                    session["client_digest"],
+                    details.get("digest"),
+                    details.get("size"),
+                )
+                result = True
             elif action == "restore":
                 payload = request.get("data")
                 if not isinstance(payload, bytes):
@@ -509,7 +631,11 @@ class LanServer:
 
     @staticmethod
     def get_paired_workstations():
-        return [dict(details) for details in _paired_clients.values()]
+        return _get_paired_workstations()
+
+    @staticmethod
+    def set_workstation_blocked(client_digest, blocked):
+        _set_workstation_blocked(client_digest, blocked)
 
     @staticmethod
     def revoke_all_workstations():
