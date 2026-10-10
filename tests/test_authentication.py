@@ -78,12 +78,13 @@ class AuthenticationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must be different"):
             database.change_password("ADMIN", bootstrap_passwords["STAFF"])
-        with self.assertRaisesRegex(ValueError, "12 characters"):
-            database.change_password("STAFF", "short")
+        with self.assertRaisesRegex(ValueError, "6 characters"):
+            database.change_password("STAFF", "12345")
+        database.change_password("STAFF", "123456")
+        self.assertEqual(database.authenticate("123456"), "STAFF")
         with self.assertRaisesRegex(ValueError, "Invalid authentication role"):
             database.change_password("NURSE", "long-enough-password")
 
-        database.change_password("STAFF", "New-Staff-Access-2026")
         self.assertEqual(database.get_pending_password_roles(), set())
 
     def test_environment_passwords_are_used_without_being_returned(self):
@@ -108,6 +109,14 @@ class AuthenticationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must be different"):
             database.initialize_authentication()
+
+    def test_bootstrap_accepts_six_character_passwords(self):
+        os.environ["NURSEROSTER_ADMIN_PASSWORD"] = "admin6"
+        os.environ["NURSEROSTER_STAFF_PASSWORD"] = "staff6"
+
+        self.assertEqual(database.initialize_authentication(), {})
+        self.assertEqual(database.authenticate("admin6"), "ADMIN")
+        self.assertEqual(database.authenticate("staff6"), "STAFF")
 
 
 if __name__ == "__main__":

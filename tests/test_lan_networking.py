@@ -73,15 +73,14 @@ class LanNetworkingTests(unittest.TestCase):
 
     def test_pairing_and_data_are_shared_through_server_api(self):
         code = self.server.pairing_code
-        details = network_transport.parse_pairing_code(code)
-        details["port"] = self.server.port
-        import base64
-        import json
-
-        encoded = base64.urlsafe_b64encode(
-            json.dumps(details, separators=(",", ":")).encode()
-        ).decode().rstrip("=")
-        network_transport.pair_with_server(f"MPH1:{encoded}")
+        self.assertRegex(code, r"^\d{6}$")
+        details = self.server.get_pairing_details()
+        network_transport.pair_with_server(
+            code,
+            host=details["host"],
+            fingerprint=details["fingerprint"],
+            port=details["port"],
+        )
         self.assertEqual(
             database.authenticate("TestAdminPassword_2026!"),
             "ADMIN",
@@ -99,11 +98,12 @@ class LanNetworkingTests(unittest.TestCase):
         )
         result = database.get_staff()
         self.assertEqual(result[0][1], "Morgan Nurse")
-        self.assertEqual(result[0][2], "MPH-NUR-000001")
+        self.assertRegex(result[0][2], r"^MPH-NUR-\d{6}$")
+        self.assertTrue(result[0][2].endswith("0001"))
         self.assertEqual(result[0][8], b"small-test-photo")
         sign_in = check_in_nurse(
             result[0][2],
-            datetime(2026, 10, 5, 7, 5, 0),
+            datetime(2026, 10, 5, 8, 5, 0),
         )
         self.assertTrue(sign_in["success"])
         attendance = database.get_attendance_by_date_range(
@@ -125,7 +125,12 @@ class LanNetworkingTests(unittest.TestCase):
         self.assertEqual(database.get_active_staff()[0][1], "Morgan Nurse")
 
     def test_admin_can_block_and_unblock_a_paired_workstation(self):
-        network_transport.pair_with_server(self.server.pairing_code)
+        network_transport.pair_with_server(
+            self.server.pairing_code,
+            host=self.server.address,
+            fingerprint=self.server.fingerprint,
+            port=self.server.port,
+        )
         config = network_config.get_client_config()
         client_digest = hashlib.sha256(
             config["client_key"].encode("utf-8")
@@ -147,8 +152,12 @@ class LanNetworkingTests(unittest.TestCase):
             unit="Emergency",
             profile_photo=b"private-photo",
         )
-        code = self.server.pairing_code
-        network_transport.pair_with_server(code)
+        network_transport.pair_with_server(
+            self.server.pairing_code,
+            host=self.server.address,
+            fingerprint=self.server.fingerprint,
+            port=self.server.port,
+        )
         self.assertEqual(
             database.authenticate("TestStaffPassword_2026!"),
             "STAFF",
@@ -160,6 +169,37 @@ class LanNetworkingTests(unittest.TestCase):
         self.assertIsNone(visible_staff[0][8])
         with self.assertRaises(PermissionError):
             network_transport.remote_server_call("get_paired_workstations")
+
+    def test_pairing_pin_requires_matching_tls_fingerprint(self):
+        self.assertEqual(
+            network_transport.get_server_fingerprint(
+                self.server.address,
+                self.server.port,
+            ),
+            self.server.fingerprint,
+        )
+        with self.assertRaises(ConnectionError):
+            network_transport.pair_with_server(
+                self.server.pairing_code,
+                host=self.server.address,
+                fingerprint="00" * 32,
+                port=self.server.port,
+            )
+
+    def test_previous_compact_pairing_code_still_parses(self):
+        import base64
+        import ipaddress
+
+        details = self.server.get_pairing_details()
+        payload = (
+            ipaddress.ip_address(details["host"]).packed
+            + details["port"].to_bytes(2, "big")
+            + bytes.fromhex(details["fingerprint"])
+            + int(details["code"]).to_bytes(3, "big")
+        )
+        encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+        parsed = network_transport.parse_pairing_code(f"MPH2:{encoded}")
+        self.assertEqual(parsed, details)
 
 
 if __name__ == "__main__":

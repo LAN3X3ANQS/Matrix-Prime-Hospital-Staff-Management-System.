@@ -81,8 +81,30 @@ class RoleUiTests(unittest.TestCase):
                 ],
                 ["Admin", "Janitor", "Front Desk", "Nurse", "Lab Tech", "Doctor"],
             )
+            self.assertTrue(form.rotation_input.isHidden())
+            form.staff_type_input.setCurrentText("Nurse")
+            self.assertFalse(form.rotation_input.isHidden())
+            form.rotation_input.setCurrentIndex(1)
+            self.assertEqual(form.get_data()["rotation_position"], 1)
+            form.staff_type_input.setCurrentText("Doctor")
+            self.assertFalse(form.rotation_input.isHidden())
+            form.staff_type_input.setCurrentText("Front Desk")
+            self.assertTrue(form.rotation_input.isHidden())
+            self.assertIsNone(form.get_data()["rotation_position"])
         finally:
             form.close()
+
+    def test_main_window_fits_inside_taskbar_aware_work_area(self):
+        window = MainWindow("STAFF")
+        try:
+            available = window._available_geometry
+            geometry = window.geometry()
+            self.assertGreaterEqual(geometry.top(), available.top())
+            self.assertGreaterEqual(geometry.left(), available.left())
+            self.assertLessEqual(geometry.bottom(), available.bottom())
+            self.assertLessEqual(geometry.right(), available.right())
+        finally:
+            window.close()
 
     def test_network_setup_offers_server_and_client_modes(self):
         with patch.object(

@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from networking.config import clear_client_config, get_client_config
-from networking.transport import pair_with_server
+from networking.transport import get_server_fingerprint, pair_with_server
 
 
 class NetworkSetupDialog(QDialog):
@@ -52,10 +53,26 @@ class NetworkSetupDialog(QDialog):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             layout.addWidget(button)
 
-        self.pairing_input = QLineEdit()
-        self.pairing_input.setPlaceholderText("Paste the server pairing code")
-        self.pairing_input.setMinimumHeight(40)
-        layout.addWidget(self.pairing_input)
+        pairing_form = QFormLayout()
+        pairing_form.setSpacing(10)
+        self.server_address_input = QLineEdit()
+        self.server_address_input.setPlaceholderText("For example, 192.168.1.25")
+        self.server_port_input = QLineEdit("48731")
+        self.server_port_input.setMaxLength(5)
+        self.pairing_pin_input = QLineEdit()
+        self.pairing_pin_input.setPlaceholderText("6-digit PIN")
+        self.pairing_pin_input.setMaxLength(6)
+        pairing_form.addRow("Server address", self.server_address_input)
+        pairing_form.addRow("Server port", self.server_port_input)
+        pairing_form.addRow("Pairing PIN", self.pairing_pin_input)
+        pairing_note = QLabel(
+            "You will be asked to compare this server's TLS fingerprint with "
+            "the value shown on the server computer."
+        )
+        pairing_note.setWordWrap(True)
+        pairing_note.setStyleSheet("font-size: 12px; color: #667085;")
+        layout.addLayout(pairing_form)
+        layout.addWidget(pairing_note)
 
         try:
             config = get_client_config()
@@ -77,7 +94,7 @@ class NetworkSetupDialog(QDialog):
         self.server_button.clicked.connect(self.make_server)
         self.client_button.clicked.connect(self.connect_to_server)
         self.saved_button.clicked.connect(self.use_saved_server)
-        self.pairing_input.returnPressed.connect(self.connect_to_server)
+        self.pairing_pin_input.returnPressed.connect(self.connect_to_server)
 
     def use_local(self):
         if self.has_saved_connection:
@@ -120,7 +137,37 @@ class NetworkSetupDialog(QDialog):
 
     def connect_to_server(self):
         try:
-            self.server = pair_with_server(self.pairing_input.text())
+            fingerprint = get_server_fingerprint(
+                self.server_address_input.text(),
+                self.server_port_input.text(),
+            )
+        except (OSError, ValueError, RuntimeError, PermissionError) as error:
+            QMessageBox.warning(self, "Could not connect", str(error))
+            return
+        confirmation = QMessageBox(self)
+        confirmation.setIcon(QMessageBox.Icon.Warning)
+        confirmation.setWindowTitle("Verify hospital server")
+        confirmation.setText(
+            "Compare this fingerprint with the one shown on the server "
+            "computer. Continue only if they match exactly."
+        )
+        confirmation.setInformativeText(f"TLS fingerprint:\n{fingerprint}")
+        confirmation.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        confirmation.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        confirmation.setDefaultButton(QMessageBox.StandardButton.No)
+        if confirmation.exec() != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.server = pair_with_server(
+                self.pairing_pin_input.text(),
+                host=self.server_address_input.text(),
+                fingerprint=fingerprint,
+                port=self.server_port_input.text(),
+            )
         except (OSError, ValueError, RuntimeError, PermissionError) as error:
             QMessageBox.warning(self, "Could not connect", str(error))
             return

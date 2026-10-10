@@ -1,5 +1,5 @@
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt
-from PySide6.QtGui import QImageReader, QPixmap
+from PySide6.QtGui import QGuiApplication, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QFrame,
     QFileDialog,
+    QScrollArea,
 )
 
 
@@ -25,7 +26,14 @@ class NurseForm(QDialog):
         self.remove_profile_photo = False
 
         self.setWindowTitle("Matrix Prime Hospital - Staff member")
-        self.setFixedSize(520, 700)
+        screen = QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        width = min(520, available.width() - 40) if available else 520
+        height = min(700, available.height() - 60) if available else 700
+        width = max(1, width)
+        height = max(1, height)
+        self.setMinimumSize(min(480, width), min(480, height))
+        self.resize(width, height)
 
         self.setup_ui()
 
@@ -117,7 +125,8 @@ class NurseForm(QDialog):
         title.setObjectName("title")
 
         description = QLabel(
-            "Register a staff member and assign their duty rotation."
+            "Register a staff member. Daily day staff have a fixed schedule; "
+            "rotating staff are assigned a shift pattern."
         )
         description.setObjectName("description")
 
@@ -159,6 +168,9 @@ class NurseForm(QDialog):
         self.staff_type_input.addItems(
             ["Admin", "Janitor", "Front Desk", "Nurse", "Lab Tech", "Doctor"]
         )
+        self.staff_type_input.currentIndexChanged.connect(
+            self.update_rotation_visibility
+        )
 
         self.rotation_input = QComboBox()
 
@@ -173,6 +185,11 @@ class NurseForm(QDialog):
         self.rotation_input.addItem(
             "Rotation 3 (O O M M N N)",
             2,
+        )
+        self.rotation_label = QLabel("Rotation")
+        self.rotation_label.setStyleSheet("color: #526779;")
+        self.rotation_input.currentIndexChanged.connect(
+            self.update_rotation_visibility
         )
 
         self.photo_preview = QLabel("No profile picture")
@@ -200,12 +217,16 @@ class NurseForm(QDialog):
         form_layout.addRow("Unit", self.unit_input)
         form_layout.addRow("Phone", self.phone_input)
         form_layout.addRow("Status", self.status_input)
-        form_layout.addRow("Rotation", self.rotation_input)
+        form_layout.addRow(self.rotation_label, self.rotation_input)
         form_layout.addRow("Profile picture", photo_row)
 
         form_card.setLayout(form_layout)
 
-        main_layout.addWidget(form_card)
+        form_scroll = QScrollArea()
+        form_scroll.setWidgetResizable(True)
+        form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        form_scroll.setWidget(form_card)
+        main_layout.addWidget(form_scroll, 1)
 
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
@@ -227,6 +248,17 @@ class NurseForm(QDialog):
         main_layout.addLayout(button_layout)
 
         self.setLayout(main_layout)
+        self.update_rotation_visibility()
+
+    def update_rotation_visibility(self):
+        daily_day_staff = self.staff_type_input.currentText() in {
+            "Janitor",
+            "Admin",
+            "Lab Tech",
+            "Front Desk",
+        }
+        self.rotation_label.setVisible(not daily_day_staff)
+        self.rotation_input.setVisible(not daily_day_staff)
 
     def load_nurse(self):
         self.name_input.setText(self.nurse[1])
@@ -357,7 +389,16 @@ class NurseForm(QDialog):
             "staff_id": self.nurse[2] if self.nurse is not None else "",
             "phone": self.phone_input.text().strip(),
             "status": self.status_input.currentText(),
-            "rotation_position": self.rotation_input.currentData(),
+            "rotation_position": (
+                None
+                if self.staff_type_input.currentText() in {
+                    "Janitor",
+                    "Admin",
+                    "Lab Tech",
+                    "Front Desk",
+                }
+                else self.rotation_input.currentData()
+            ),
             "staff_type": self.staff_type_input.currentText(),
             "unit": self.unit_input.text().strip(),
             "profile_photo": self.profile_photo,

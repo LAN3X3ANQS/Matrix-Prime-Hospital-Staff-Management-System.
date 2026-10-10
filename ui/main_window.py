@@ -1,4 +1,6 @@
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QRect
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -63,13 +65,46 @@ class MainWindow(QMainWindow):
         self.role = role
         self.lan_server = lan_server
         self.setWindowTitle("Matrix Prime Hospital | Staff Management")
-        self.resize(1360, 850)
-        self.setMinimumSize(1050, 680)
+        self._available_geometry = self._primary_available_geometry()
+        self._apply_available_geometry(self._available_geometry)
         self.pages_by_key = {}
         self.navigation_buttons = {}
         self.setup_ui()
         self.apply_styles()
         self.open_page("dashboard")
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            screen.availableGeometryChanged.connect(
+                self._handle_available_geometry_changed
+            )
+
+    @staticmethod
+    def _primary_available_geometry():
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, 1360, 850)
+        return screen.availableGeometry()
+
+    def _apply_available_geometry(self, available):
+        width = max(1, available.width() - 32)
+        height = max(1, available.height() - 40)
+        minimum_width = min(1050, width)
+        minimum_height = min(680, height)
+        self.setMinimumSize(minimum_width, minimum_height)
+        target_width = min(1360, width)
+        target_height = min(850, height)
+        self.resize(target_width, target_height)
+        self.move(
+            available.x() + (available.width() - target_width) // 2,
+            available.y() + (available.height() - target_height) // 2,
+        )
+
+    def _handle_available_geometry_changed(self, available):
+        self._available_geometry = available
+        if self.isMaximized():
+            self.showMaximized()
+        else:
+            self._apply_available_geometry(available)
 
     def setup_ui(self):
         central = QWidget()

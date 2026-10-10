@@ -165,7 +165,7 @@ class AttendanceHistoryView(QWidget):
 
         self.table = QTableWidget()
 
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(11)
 
         self.table.setHorizontalHeaderLabels([
             "Date",
@@ -177,6 +177,7 @@ class AttendanceHistoryView(QWidget):
             "Sign-in",
             "Sign-out",
             "Status",
+            "Departure",
             "Record ID",
         ])
 
@@ -298,13 +299,14 @@ class AttendanceHistoryView(QWidget):
                 record[5] or "",
                 record[9] or "Not signed out",
                 record[6],
+                record[11] or "",
                 str(record[0]),
             ]
 
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
 
-                if column in (0, 2, 3, 4, 5, 6, 7, 8, 9):
+                if column in (0, 2, 3, 4, 5, 6, 7, 8, 9, 10):
                     item.setTextAlignment(
                         Qt.AlignmentFlag.AlignCenter
                     )
@@ -315,6 +317,10 @@ class AttendanceHistoryView(QWidget):
                         if record[6] == "Present"
                         else Qt.GlobalColor.darkYellow
                     )
+                if column == 9 and record[11] == "Early":
+                    item.setForeground(Qt.GlobalColor.darkYellow)
+                elif column == 9 and record[11] == "On time":
+                    item.setForeground(Qt.GlobalColor.darkGreen)
 
                 self.table.setItem(row, column, item)
 
@@ -330,7 +336,7 @@ class AttendanceHistoryView(QWidget):
             QHeaderView.ResizeMode.Stretch,
         )
 
-        for column in range(2, 10):
+        for column in range(2, 11):
             header.setSectionResizeMode(
                 column,
                 QHeaderView.ResizeMode.ResizeToContents,

@@ -216,19 +216,6 @@ def _local_address():
         probe.close()
 
 
-def _pairing_string(code, address, fingerprint, port):
-    details = {
-        "host": address,
-        "port": port,
-        "fingerprint": fingerprint,
-        "code": code,
-    }
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(details, separators=(",", ":")).encode("utf-8")
-    ).decode("ascii").rstrip("=")
-    return f"MPH1:{encoded}"
-
-
 def _client_allowed(client_key):
     if not isinstance(client_key, str) or len(client_key) < 32:
         return False
@@ -407,7 +394,7 @@ class _Handler(BaseHTTPRequestHandler):
                 _pair_attempts += 1
                 if _pair_attempts >= MAX_PAIR_ATTEMPTS:
                     _pair_code = None
-                self._reply(403, error="The pairing code is invalid or expired.")
+                self._reply(403, error="The pairing PIN is invalid or expired.")
                 return
             if len(_paired_clients) >= MAX_PAIRED_WORKSTATIONS:
                 self._reply(403, error="The server has reached its workstation limit.")
@@ -595,12 +582,9 @@ class LanServer:
         _pair_code = f"{secrets.randbelow(1_000_000):06d}"
         _pair_deadline = time.monotonic() + PAIR_CODE_LIFETIME_SECONDS
         _pair_attempts = 0
-        self.pairing_code = _pairing_string(
-            _pair_code,
-            _local_address(),
-            _fingerprint(),
-            self.port,
-        )
+        self.pairing_code = _pair_code
+        self.address = _local_address()
+        self.fingerprint = _fingerprint()
         self.thread = threading.Thread(
             target=self.server.serve_forever,
             name="mph-lan-server",
@@ -621,13 +605,16 @@ class LanServer:
             _pair_code = f"{secrets.randbelow(1_000_000):06d}"
             _pair_deadline = time.monotonic() + PAIR_CODE_LIFETIME_SECONDS
             _pair_attempts = 0
-            self.pairing_code = _pairing_string(
-                _pair_code,
-                _local_address(),
-                _fingerprint(),
-                self.port,
-            )
+            self.pairing_code = _pair_code
         return self.pairing_code
+
+    def get_pairing_details(self):
+        return {
+            "host": self.address,
+            "port": self.port,
+            "fingerprint": self.fingerprint,
+            "code": self.pairing_code,
+        }
 
     @staticmethod
     def get_paired_workstations():

@@ -21,6 +21,7 @@ from database.models import Staff
 from analytics.attendance_analytics import get_staff_attendance_score
 from ui.nurse_form import NurseForm
 from ui.staff_profile_dialog import StaffProfileDialog
+from roster.scheduler import DAILY_DAY_STAFF_TYPES
 
 
 class NursesView(QWidget):
@@ -320,7 +321,9 @@ class NursesView(QWidget):
         for row, nurse in enumerate(nurses):
             rotation_position = nurse[5]
 
-            if rotation_position == 0:
+            if nurse[6] in DAILY_DAY_STAFF_TYPES:
+                rotation = "Daily 8 AM–6 PM"
+            elif rotation_position == 0:
                 rotation = "Rotation 1"
             elif rotation_position == 1:
                 rotation = "Rotation 2"

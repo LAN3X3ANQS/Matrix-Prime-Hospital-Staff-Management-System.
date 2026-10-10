@@ -38,7 +38,7 @@ On a fresh database, the application creates separate, random Admin and Staff
 passwords and displays them once in the setup dialog and launching terminal.
 Set `NURSEROSTER_ADMIN_PASSWORD` and/or `NURSEROSTER_STAFF_PASSWORD` before the
 first launch to provision chosen passwords instead. Seeded passwords must be
-at least 12 characters; Admin and Staff passwords must differ. The database
+at least 6 characters; Admin and Staff passwords must differ. The database
 stores password hashes and salts, not plaintext passwords. Generated passwords
 are shown only at creation time, so record them securely. There is no first-run
 password setup screen; Admin can change the shared passwords from **Settings**.
@@ -57,28 +57,43 @@ accounts. An **Admin** staff type in the directory is an employee record, not
 an individual application account. Attendance uses each worker's Staff ID and
 records their directory category.
 
+New Staff IDs use `MPH-{type abbreviation}-{YY}{sequence}` and the sequence
+starts at `0001` for each staff type in each calendar year (for example,
+`MPH-ADM-260001`). IDs already assigned to existing staff remain unchanged.
+
 The roster follows a stable six-day rotation, so looking at the same date in
 different roster date ranges gives the same shift. Attendance records separately
 capture sign-in and sign-out for each Morning or Night shift. The 30-day profile
 reliability score is on-time check-ins divided by scheduled shifts, excluding
 approved leave; it is not a measure of job performance.
 
+Janitors, Admin staff, Lab Techs, and Front Desk staff are scheduled every day
+on a 8:00 AM–6:00 PM day shift and do not receive a rotating roster assignment.
+Nurses and Doctors continue to use the six-day rotating shift patterns.
+Sign-outs before the scheduled shift end are recorded as **Early**. Sign-out
+is accepted until 30 minutes after the scheduled shift end; after that cutoff,
+the open sign-in can no longer be closed.
+
 ## Data sharing and backups
 
 The app supports a **hospital LAN server**. On the computer designated as the
 server, launch the app and choose **Make this computer the shared server**.
-Keep that computer and app running. Copy the short-lived pairing code from the
-server window to each workstation, choose **Connect to a shared server**, and
-paste the code. The client saves its server connection; staff still sign in
-with the shared Admin or Staff password. The Admin Settings page on the server
-computer can generate another pairing code or revoke all paired computers.
+Keep that computer and app running. Copy the server address, port, six-digit
+PIN, and TLS fingerprint shown in the server window to each workstation. On
+the workstation, choose **Connect to a shared server** and enter those
+details. Compare the TLS fingerprint shown on both computers before
+connecting; do not continue if they differ. The client saves its server
+connection; staff still sign in with the shared Admin or Staff password. The
+Admin Settings page on the server computer can generate another PIN or revoke
+all paired computers.
 
 The server uses an encrypted TLS connection with a certificate fingerprint
-carried in the pairing code. Pairing codes expire after five minutes; they can
-be used to pair multiple hospital workstations during that window. Share them
-only with authorized computers on the hospital network. Before deployment,
-hospital IT should assign the server computer a stable private-network address
-and allow inbound TCP port **48731** only on the hospital's private network.
+verified against the server's displayed fingerprint during pairing. PINs
+expire after five minutes and can pair multiple hospital workstations during
+that window. Share them only with authorized computers on the hospital
+network. Before deployment, hospital IT should assign the server computer a
+stable private-network address and allow inbound TCP port **48731** only on
+the hospital's private network.
 Do not expose this port to the public internet. The server rejects connections
 from public IP addresses, but firewall configuration is still required.
 
@@ -96,7 +111,8 @@ a backup from **Data & backups**; any server data changes make that backup
 out of date. A PC with a complete backup can be selected to prepare a base
 server change. The handoff is coordinated: start that PC in shared-server
 mode, restore its saved backup, then pair the remaining PCs to the new server
-with its pairing code. Settings does not remotely start another PC's server.
+with its new connection details and PIN. Settings does not remotely start
+another PC's server.
 
 Data & backups can create and restore full database backup files. In shared
 mode, backups are created from and restored to the server database. Backup

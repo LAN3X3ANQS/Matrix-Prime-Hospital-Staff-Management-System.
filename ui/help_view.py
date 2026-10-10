@@ -70,13 +70,17 @@ class HelpView(QWidget):
                 </ul>
                 <h2>Shared server administration</h2>
                 <p>Keep the base-server computer running while workstations
-                need shared data. Generate a pairing code from Settings for
-                authorized PCs. Block a paired PC to disconnect it and prevent
-                sign-in; unblock it to restore access. A workstation backup is
-                complete only while it matches the current server database.</p>
+                need shared data. Generate a six-digit PIN from Settings for
+                authorized PCs. Enter the server address, port, and PIN on
+                each workstation, and verify that its TLS fingerprint matches
+                the server before pairing. Block a paired PC to disconnect it
+                and prevent sign-in; unblock it to restore access. A workstation
+                backup is complete only while it matches the current server
+                database.</p>
                 <p>To prepare a server handoff, save a current backup on the
                 selected PC, start that PC in shared-server mode, restore its
-                backup there, and pair the other PCs to its new pairing code.
+                backup there, and pair the other PCs using its new connection
+                details and PIN.
                 Keep the old server running until the new server has been
                 checked.</p>
             """
@@ -115,8 +119,8 @@ class HelpView(QWidget):
                     both computers are connected to the hospital network.
                     Contact hospital IT if the connection or firewall may
                     have changed.</li>
-                    <li><b>Pairing code rejected:</b> ask an Admin for a new
-                    code. Pairing codes expire after five minutes.</li>
+                    <li><b>Pairing PIN rejected:</b> ask an Admin for a new
+                    PIN. PINs expire after five minutes.</li>
                     <li><b>Backup shows out of date:</b> create a new backup
                     from Data &amp; backups on that workstation. A server data
                     change makes previous workstation backups out of date.</li>

@@ -155,6 +155,7 @@ class StaffAndBackupTests(unittest.TestCase):
         self.assertEqual(attendance[0][5], "07:05:00")
         self.assertEqual(attendance[0][8], "Legacy")
         self.assertIsNone(attendance[0][9])
+        self.assertIsNone(attendance[0][11])
 
     def test_staff_id_unit_and_profile_photo_are_saved(self):
         staff = Nurse(None, "Casey Cleaner", "", "")
@@ -166,9 +167,19 @@ class StaffAndBackupTests(unittest.TestCase):
             profile_photo=b"jpeg-data",
         )
         saved = database.get_staff()[0]
-        self.assertEqual(saved[2], "MPH-JAN-000001")
+        self.assertRegex(saved[2], r"^MPH-JAN-\d{6}$")
+        self.assertTrue(saved[2].endswith("0001"))
         self.assertEqual(saved[7], "Facilities")
         self.assertEqual(saved[8], b"jpeg-data")
+        next_staff = Nurse(None, "Second Cleaner", "", "")
+        database.add_staff(
+            next_staff,
+            staff_type="Janitor",
+            unit="Facilities",
+        )
+        self.assertTrue(
+            next_staff.staff_id.endswith("0002")
+        )
 
     def test_shift_sign_in_and_sign_out_are_recorded(self):
         staff = Nurse(None, "Morgan Nurse", "", "")
@@ -182,7 +193,7 @@ class StaffAndBackupTests(unittest.TestCase):
 
         check_in = check_in_nurse(
             staff_id,
-            datetime(2026, 10, 5, 7, 10, 0),
+            datetime(2026, 10, 5, 8, 10, 0),
         )
         self.assertTrue(check_in["success"])
         self.assertEqual(check_in["status"], "Present")
@@ -197,13 +208,14 @@ class StaffAndBackupTests(unittest.TestCase):
         )
         self.assertEqual(records[0][8], "Morning")
         self.assertEqual(records[0][9], "18:45:00")
+        self.assertEqual(records[0][11], "Early")
 
     def test_late_check_in_and_overnight_sign_out(self):
         staff = Nurse(None, "Taylor Lab", "", "")
         database.add_staff(
             staff,
             rotation_position=0,
-            staff_type="Lab Tech",
+            staff_type="Nurse",
             unit="Laboratory",
         )
         staff_id = database.get_staff()[0][2]
@@ -224,6 +236,66 @@ class StaffAndBackupTests(unittest.TestCase):
         )
         self.assertEqual(records[0][8], "Night")
         self.assertEqual(records[0][9], "06:30:00")
+        self.assertEqual(records[0][11], "Early")
+
+    def test_daily_day_shift_and_thirty_minute_checkout_grace(self):
+        staff = Nurse(None, "Alex Janitor", "", "")
+        database.add_staff(
+            staff,
+            rotation_position=2,
+            staff_type="Janitor",
+            unit="Facilities",
+        )
+        staff_id = database.get_staff()[0][2]
+        self.assertIsNone(database.get_staff()[0][5])
+
+        check_in = check_in_nurse(
+            staff_id,
+            datetime(2026, 10, 5, 8, 0, 0),
+        )
+        self.assertTrue(check_in["success"])
+        early = check_out_nurse(
+            staff_id,
+            datetime(2026, 10, 5, 17, 59, 0),
+        )
+        self.assertTrue(early["success"])
+        self.assertEqual(early["status"], "Early")
+        self.assertEqual(early["scheduled_end"], "18:00:00")
+
+        second_staff = Nurse(None, "Jordan Janitor", "", "")
+        database.add_staff(
+            second_staff,
+            staff_type="Janitor",
+            unit="Facilities",
+        )
+        check_in = check_in_nurse(
+            second_staff.staff_id,
+            datetime(2026, 10, 5, 8, 0, 0),
+        )
+        self.assertTrue(check_in["success"])
+        within_grace = check_out_nurse(
+            second_staff.staff_id,
+            datetime(2026, 10, 5, 18, 30, 0),
+        )
+        self.assertTrue(within_grace["success"])
+        self.assertEqual(within_grace["status"], "On time")
+
+        third_staff = Nurse(None, "Casey Janitor", "", "")
+        database.add_staff(
+            third_staff,
+            staff_type="Janitor",
+            unit="Facilities",
+        )
+        check_in = check_in_nurse(
+            third_staff.staff_id,
+            datetime(2026, 10, 5, 8, 0, 0),
+        )
+        self.assertTrue(check_in["success"])
+        after_grace = check_out_nurse(
+            third_staff.staff_id,
+            datetime(2026, 10, 5, 18, 31, 0),
+        )
+        self.assertFalse(after_grace["success"])
 
     def test_reliability_score_matches_attendance_to_scheduled_shifts(self):
         staff = (1, "Morgan Nurse", "MPH-NUR-000001", "", "Active", 0,
@@ -270,7 +342,7 @@ class StaffAndBackupTests(unittest.TestCase):
 
         self.assertEqual(
             [record[2] for record in database.get_staff()],
-            ["MPH-JAN-000001"],
+            [f"MPH-JAN-{date.today().year % 100:02d}0001"],
         )
         self.assertEqual(database.authenticate("unknown-password"), None)
 
@@ -289,7 +361,7 @@ class StaffAndBackupTests(unittest.TestCase):
 
         self.assertEqual(
             [record[2] for record in database.get_staff()],
-            ["MPH-NUR-000001"],
+            [f"MPH-NUR-{date.today().year % 100:02d}0001"],
         )
 
 

@@ -149,8 +149,37 @@ class ExportView(QWidget):
             rows = get_attendance_by_date_range(start_iso, end_iso)
             return (
                 "Attendance",
-                ["Record ID", "Staff record ID", "Staff member", "Staff ID", "Date", "Time", "Status", "Staff type"],
-                rows,
+                [
+                    "Record ID",
+                    "Staff record ID",
+                    "Staff member",
+                    "Staff ID",
+                    "Date",
+                    "Sign-in",
+                    "Attendance status",
+                    "Staff type",
+                    "Unit",
+                    "Shift",
+                    "Sign-out",
+                    "Departure status",
+                ],
+                [
+                    (
+                        record[0],
+                        record[1],
+                        record[2],
+                        record[3],
+                        record[4],
+                        record[5],
+                        record[6],
+                        record[7],
+                        record[10],
+                        record[8],
+                        record[9],
+                        record[11],
+                    )
+                    for record in rows
+                ],
             )
 
         if dataset == "leave":

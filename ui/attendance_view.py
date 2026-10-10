@@ -283,10 +283,12 @@ class AttendanceView(QWidget):
             f"Staff ID: {staff[2]}\n"
             f"Shift: {result['shift']}\n"
             f"Sign-in: {result['sign_in_time']}\n"
-            f"Sign-out: {result['time']}"
+            f"Sign-out: {result['time']} ({result['status']})\n"
+            f"Scheduled end: {result['scheduled_end']}"
         )
+        result_color = "#A15C07" if result["status"] == "Early" else "#16803C"
         self.result_label.setStyleSheet(
-            "font-size: 15px; font-weight: 600; color: #16803C;"
+            f"font-size: 15px; font-weight: 600; color: {result_color};"
         )
         self.staff_id_input.clear()
         self.staff_id_input.setFocus()

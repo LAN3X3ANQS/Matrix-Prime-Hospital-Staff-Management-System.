@@ -91,26 +91,44 @@ def main():
         pairing.setWindowTitle("Matrix Prime Hospital - Pair workstations")
         pairing.setMinimumWidth(620)
         pairing_layout = QVBoxLayout(pairing)
-        pairing_layout.addWidget(QLabel(
-            "Shared server is running on this computer. Copy this pairing code "
-            "to each hospital workstation within five minutes. The same code "
-            "can pair multiple computers during that window. The code is "
-            "protected by a pinned TLS certificate and does not replace the "
-            "Staff/Admin sign-in password."
-        ))
-        code_field = QLabel(lan_server.pairing_code)
-        code_field.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        code_field.setWordWrap(True)
-        code_field.setStyleSheet(
-            "font-family: Consolas; font-size: 12px; padding: 12px; "
-            "background: #F2F4F7; border: 1px solid #D0D5DD;"
+        details = lan_server.get_pairing_details()
+        copy_text = (
+            f"Server address: {details['host']}\n"
+            f"Server port: {details['port']}\n"
+            f"Pairing PIN: {details['code']}\n"
+            f"TLS fingerprint: {details['fingerprint']}"
         )
-        pairing_layout.addWidget(code_field)
+        pairing_layout.addWidget(QLabel(
+            "Shared server is running. On each workstation, enter the server "
+            "address and six-digit PIN below, then compare the TLS fingerprint "
+            "with this screen before connecting. The PIN expires after five "
+            "minutes and can pair multiple computers during that window."
+        ))
+        address_field = QLabel(f"Server address: {details['host']}")
+        port_field = QLabel(f"Server port: {details['port']}")
+        pin_field = QLabel(f"Pairing PIN: {details['code']}")
+        fingerprint_field = QLabel(
+            f"TLS fingerprint (verify on every workstation):\n"
+            f"{details['fingerprint']}"
+        )
+        fingerprint_field.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        fingerprint_field.setWordWrap(True)
+        for field in (address_field, port_field, pin_field, fingerprint_field):
+            field.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            field.setStyleSheet(
+                "font-family: Consolas; padding: 10px; "
+                "background: #F2F4F7; border: 1px solid #D0D5DD;"
+            )
+            pairing_layout.addWidget(field)
         actions = QHBoxLayout()
-        copy_button = QPushButton("Copy pairing code")
+        copy_button = QPushButton("Copy pairing details")
         done_button = QPushButton("Continue")
         copy_button.clicked.connect(
-            lambda: QGuiApplication.clipboard().setText(lan_server.pairing_code)
+            lambda: QGuiApplication.clipboard().setText(copy_text)
         )
         done_button.clicked.connect(pairing.accept)
         actions.addWidget(copy_button)

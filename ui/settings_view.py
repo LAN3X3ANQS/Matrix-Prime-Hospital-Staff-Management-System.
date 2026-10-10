@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 from database.database import change_password, get_pending_password_roles
 from networking.config import get_client_config
 from networking.transport import remote_server_call
-from PySide6.QtWidgets import QInputDialog
 
 
 class SettingsView(QWidget):
@@ -36,13 +35,13 @@ class SettingsView(QWidget):
         if self.initial_setup_pending:
             description_text = (
                 "Initial access passwords are active. Update each shared "
-                "password here. Each must be at least 12 characters, and "
+                "password here. Each must be at least 6 characters, and "
                 "the Admin and Staff passwords must differ."
             )
         else:
             description_text = (
                 "Update the shared access passwords. Each must be at least "
-                "12 characters, and the Admin and Staff passwords must differ."
+                "6 characters, and the Admin and Staff passwords must differ."
             )
         description = QLabel(description_text)
         description.setObjectName("settings_description")
@@ -96,7 +95,7 @@ class SettingsView(QWidget):
         layout.addWidget(detail_label)
 
         new_password = QLineEdit()
-        new_password.setPlaceholderText("New password (12 characters minimum)")
+        new_password.setPlaceholderText("New password (6 characters minimum)")
         new_password.setEchoMode(QLineEdit.EchoMode.Password)
         confirm_password = QLineEdit()
         confirm_password.setPlaceholderText("Confirm new password")
@@ -138,7 +137,7 @@ class SettingsView(QWidget):
         self.refresh_workstations_button.clicked.connect(self.refresh_workstations)
         actions.addWidget(self.refresh_workstations_button)
         if self.lan_server is not None:
-            pairing_button = QPushButton("Generate pairing code")
+            pairing_button = QPushButton("Generate pairing PIN")
             pairing_button.clicked.connect(self.show_pairing_code)
             revoke_button = QPushButton("Revoke all workstations")
             revoke_button.clicked.connect(self.revoke_workstations)
@@ -332,23 +331,48 @@ class SettingsView(QWidget):
             "3. Sign in as Admin, open Data & backups, and restore the "
             "verified backup saved on that PC.\n"
             "4. Pair each workstation to the new server using its new "
-            "pairing code.\n\n"
+            "address, fingerprint, and six-digit PIN.\n\n"
             "Keep the current server running until the backup is restored. "
             "After confirming the new server works, close the old server.",
         )
 
     def show_pairing_code(self):
-        pairing_code = self.lan_server.create_pairing_code()
-        code, accepted = QInputDialog.getText(
-            self,
-            "Workstation pairing code",
-            "Copy this short-lived code to the hospital workstations to pair them:",
-            text=pairing_code,
+        self.lan_server.create_pairing_code()
+        details = self.lan_server.get_pairing_details()
+        copy_text = (
+            f"Server address: {details['host']}\n"
+            f"Server port: {details['port']}\n"
+            f"Pairing PIN: {details['code']}\n"
+            f"TLS fingerprint: {details['fingerprint']}"
         )
-        if accepted:
-            from PySide6.QtGui import QGuiApplication
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setWindowTitle("Workstation pairing details")
+        dialog.setText(
+            "Enter the server address and six-digit PIN on each workstation. "
+            "Before connecting, compare its TLS fingerprint with this value."
+        )
+        dialog.setInformativeText(
+            f"Server address: {details['host']}\n"
+            f"Server port: {details['port']}\n"
+            f"Pairing PIN: {details['code']}\n"
+            f"TLS fingerprint:\n{details['fingerprint']}\n\n"
+            "The PIN expires in five minutes."
+        )
+        dialog.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        copy_button = dialog.addButton(
+            "Copy pairing details",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        from PySide6.QtGui import QGuiApplication
 
-            QGuiApplication.clipboard().setText(code)
+        copy_button.clicked.connect(
+            lambda: QGuiApplication.clipboard().setText(copy_text)
+        )
+        dialog.addButton(QMessageBox.StandardButton.Close)
+        dialog.exec()
 
     def revoke_workstations(self):
         confirmation = QMessageBox.warning(
@@ -406,5 +430,5 @@ class SettingsView(QWidget):
         if not self.initial_setup_pending:
             self.description_label.setText(
                 "Update the shared access passwords. Each must be at least "
-                "12 characters, and the Admin and Staff passwords must differ."
+                "6 characters, and the Admin and Staff passwords must differ."
             )

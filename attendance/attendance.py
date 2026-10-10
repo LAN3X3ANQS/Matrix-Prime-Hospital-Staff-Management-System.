@@ -9,10 +9,13 @@ from database.database import (
 )
 from roster.scheduler import generate_roster
 
-MORNING_START = time(7, 0)
+MORNING_START = time(8, 0)
 MORNING_END = time(19, 0)
+DAILY_STAFF_END = time(18, 0)
 NIGHT_START = time(19, 0)
 NIGHT_END = time(7, 0)
+SIGN_OUT_GRACE_MINUTES = 30
+DAILY_DAY_STAFF_TYPES = {"Janitor", "Admin", "Lab Tech", "Front Desk"}
 
 
 def get_today():
@@ -53,9 +56,14 @@ def get_shift_date(current_date, current_time):
     return current_date
 
 
-def is_within_shift(shift, current_time):
+def is_within_shift(shift, current_time, staff_type=None):
     if shift == "Morning":
-        return MORNING_START <= current_time < MORNING_END
+        shift_end = (
+            DAILY_STAFF_END
+            if staff_type in DAILY_DAY_STAFF_TYPES
+            else MORNING_END
+        )
+        return MORNING_START <= current_time < shift_end
     if shift == "Night":
         return current_time >= NIGHT_START or current_time < NIGHT_END
 
@@ -105,9 +113,15 @@ def check_in_nurse(staff_id, now=None):
             "shift_date": shift_date.isoformat(),
         }
 
-    if not is_within_shift(shift, now.time()):
+    if not is_within_shift(shift, now.time(), nurse[6]):
         if shift == "Morning":
-            duty_time = "7:00 AM - 7:00 PM"
+            end_time = (
+                DAILY_STAFF_END
+                if nurse[6] in DAILY_DAY_STAFF_TYPES
+                else MORNING_END
+            )
+            formatted_end = end_time.strftime("%I:%M %p").lstrip("0")
+            duty_time = f"7:00 AM - {formatted_end}"
         else:
             duty_time = "7:00 PM - 7:00 AM"
 
@@ -216,9 +230,34 @@ def check_out_nurse(staff_id, now=None):
                     attendance_date,
                     datetime.strptime(record[1], "%H:%M:%S").time(),
                 )
-                if signed_in_at <= now and now - signed_in_at <= timedelta(hours=18):
+                staff_type = staff[6]
+                if shift == "Night":
+                    shift_ends_at = datetime.combine(
+                        attendance_date + timedelta(days=1),
+                        NIGHT_END,
+                    )
+                else:
+                    shift_end = (
+                        DAILY_STAFF_END
+                        if staff_type in DAILY_DAY_STAFF_TYPES
+                        else MORNING_END
+                    )
+                    shift_ends_at = datetime.combine(
+                        attendance_date,
+                        shift_end,
+                    )
+                sign_out_deadline = shift_ends_at + timedelta(
+                    minutes=SIGN_OUT_GRACE_MINUTES
+                )
+                if signed_in_at <= now <= sign_out_deadline:
                     open_shifts.append(
-                        (signed_in_at, date_text, shift, record)
+                        (
+                            signed_in_at,
+                            date_text,
+                            shift,
+                            record,
+                            shift_ends_at,
+                        )
                     )
 
     if not open_shifts:
@@ -228,13 +267,20 @@ def check_out_nurse(staff_id, now=None):
             "staff": staff,
         }
 
-    _, attendance_date, shift, record = max(
+    _, attendance_date, shift, record, shift_ends_at = max(
         open_shifts,
         key=lambda item: item[0],
     )
     sign_out_time = now.strftime("%H:%M:%S")
+    sign_out_status = "Early" if now < shift_ends_at else "On time"
     try:
-        record_sign_out(staff[0], attendance_date, shift, sign_out_time)
+        record_sign_out(
+            staff[0],
+            attendance_date,
+            shift,
+            sign_out_time,
+            sign_out_status,
+        )
     except ValueError as error:
         return {
             "success": False,
@@ -244,12 +290,18 @@ def check_out_nurse(staff_id, now=None):
 
     return {
         "success": True,
-        "message": f"Sign-out recorded for the {shift} shift.",
+        "message": (
+            f"Early sign-out recorded for the {shift} shift."
+            if sign_out_status == "Early"
+            else f"Sign-out recorded for the {shift} shift."
+        ),
         "staff": staff,
         "shift": shift,
         "shift_date": attendance_date,
         "time": sign_out_time,
         "sign_in_time": record[1],
+        "status": sign_out_status,
+        "scheduled_end": shift_ends_at.strftime("%H:%M:%S"),
     }
 
 

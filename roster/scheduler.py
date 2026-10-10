@@ -11,6 +11,7 @@ ROTATION = [
 ]
 
 ROTATION_ANCHOR = date(2026, 10, 5)
+DAILY_DAY_STAFF_TYPES = {"Janitor", "Admin", "Lab Tech", "Front Desk"}
 
 
 def get_shift_for_day(rotation_start, day):
@@ -33,20 +34,24 @@ def generate_roster(nurses, start_date, number_of_days):
         }
 
         for nurse in nurses:
-            rotation_position = nurse[5]
+            staff_type = nurse[6] if len(nurse) > 6 else "Nurse"
+            if staff_type in DAILY_DAY_STAFF_TYPES:
+                shift = "Morning"
+            else:
+                rotation_position = nurse[5]
 
-            if rotation_position is None:
-                rotation_position = 0
+                if rotation_position is None:
+                    rotation_position = 0
 
-            nurse_start_date = (
-                ROTATION_ANCHOR
-                - timedelta(days=rotation_position * 2)
-            )
+                nurse_start_date = (
+                    ROTATION_ANCHOR
+                    - timedelta(days=rotation_position * 2)
+                )
 
-            shift = get_shift_for_day(
-                nurse_start_date,
-                current_date
-            )
+                shift = get_shift_for_day(
+                    nurse_start_date,
+                    current_date
+                )
 
             day_roster["nurses"].append({
                 "nurse": nurse,

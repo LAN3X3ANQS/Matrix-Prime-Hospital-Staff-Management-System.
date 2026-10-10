@@ -85,7 +85,7 @@ def _connection(config):
         if not secrets.compare_digest(actual, connection._mph_fingerprint):
             connection.close()
             raise ssl.SSLError(
-                "The hospital server certificate does not match the pairing code."
+                "The hospital server certificate does not match the verified fingerprint."
             )
 
     connection.connect = pinned_connect
@@ -107,7 +107,9 @@ def _post(config, path, body, session=True):
         )
         response = connection.getresponse()
         payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, ssl.SSLError, http.client.HTTPException, ValueError) as error:
+    except ssl.SSLError as error:
+        raise ConnectionError(str(error)) from error
+    except (OSError, http.client.HTTPException, ValueError) as error:
         raise ConnectionError(
             "Could not securely connect to the hospital server. "
             "Check that it is running and both computers are on the hospital network."
@@ -124,23 +126,66 @@ def _post(config, path, body, session=True):
     return _decode(payload.get("result"))
 
 
+def get_server_fingerprint(host, port=48731):
+    try:
+        address = ipaddress.ip_address(host.strip())
+        port = int(port)
+        if not address.is_private or not 1 <= port <= 65535:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError("Enter a valid private server address and port.") from error
+
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((str(address), port), timeout=8) as raw_socket:
+            with context.wrap_socket(
+                raw_socket,
+                server_hostname=str(address),
+            ) as connection:
+                return hashlib.sha256(
+                    connection.getpeercert(binary_form=True)
+                ).hexdigest()
+    except (OSError, ssl.SSLError) as error:
+        raise ConnectionError(
+            "Could not read the server fingerprint. Check the address, port, "
+            "and that the server is running on the hospital network."
+        ) from error
+
+
 def parse_pairing_code(pairing_code):
     try:
         if not isinstance(pairing_code, str):
             raise ValueError
         prefix, encoded = pairing_code.strip().split(":", 1)
-        if prefix != "MPH1":
+        if prefix == "MPH2":
+            raw = base64.b64decode(
+                encoded + "=" * (-len(encoded) % 4),
+                altchars=b"-_",
+                validate=True,
+            )
+            if len(raw) not in (41, 53):
+                raise ValueError
+            address_size = len(raw) - 37
+            address = ipaddress.ip_address(raw[:address_size])
+            port = int.from_bytes(raw[address_size : address_size + 2], "big")
+            fingerprint = raw[address_size + 2 : address_size + 34].hex()
+            code_number = int.from_bytes(raw[address_size + 34 :], "big")
+            if code_number > 999999:
+                raise ValueError
+            code = f"{code_number:06d}"
+        elif prefix == "MPH1":
+            raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+            details = json.loads(raw.decode("utf-8"))
+            if not isinstance(details, dict) or not isinstance(details.get("host"), str):
+                raise ValueError
+            address = ipaddress.ip_address(details["host"])
+            port = int(details["port"])
+            fingerprint = details["fingerprint"]
+            code = details["code"]
+        else:
             raise ValueError
-        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-        details = json.loads(raw.decode("utf-8"))
-        if not isinstance(details, dict):
-            raise ValueError
-        if not isinstance(details.get("host"), str):
-            raise ValueError
-        address = ipaddress.ip_address(details["host"])
-        port = int(details["port"])
-        fingerprint = details["fingerprint"]
-        code = details["code"]
         if (
             not address.is_private
             or not 1 <= port <= 65535
@@ -152,8 +197,14 @@ def parse_pairing_code(pairing_code):
             or not code.isdigit()
         ):
             raise ValueError
-        return details
+        return {
+            "host": str(address),
+            "port": port,
+            "fingerprint": fingerprint,
+            "code": code,
+        }
     except (
+        TypeError,
         KeyError,
         ValueError,
         UnicodeDecodeError,
@@ -162,8 +213,43 @@ def parse_pairing_code(pairing_code):
         raise ValueError("That is not a valid Matrix Prime Hospital pairing code.") from error
 
 
-def pair_with_server(pairing_code):
-    details = parse_pairing_code(pairing_code)
+def pair_with_server(
+    pairing_pin=None,
+    *,
+    host=None,
+    fingerprint=None,
+    port=48731,
+):
+    if host is None:
+        details = parse_pairing_code(pairing_pin)
+    else:
+        try:
+            address = ipaddress.ip_address(host.strip())
+            if (
+                not address.is_private
+                or not isinstance(pairing_pin, str)
+                or len(pairing_pin) != 6
+                or not pairing_pin.isdigit()
+                or not isinstance(fingerprint, str)
+                or len(fingerprint) != 64
+                or any(
+                    character not in "0123456789abcdefABCDEF"
+                    for character in fingerprint
+                )
+                or not 1 <= int(port) <= 65535
+            ):
+                raise ValueError
+        except (AttributeError, TypeError, ValueError) as error:
+            raise ValueError(
+                "Enter a valid private server address, six-digit PIN, and "
+                "64-character TLS fingerprint."
+            ) from error
+        details = {
+            "host": str(address),
+            "port": int(port),
+            "fingerprint": fingerprint.lower(),
+            "code": pairing_pin,
+        }
     config = {
         "host": details["host"],
         "port": int(details["port"]),

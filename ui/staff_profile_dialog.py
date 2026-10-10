@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
 )
+from roster.scheduler import DAILY_DAY_STAFF_TYPES
 
 
 class StaffProfileDialog(QDialog):
@@ -70,11 +71,14 @@ class StaffProfileDialog(QDialog):
         fields.addRow("Phone", QLabel(self.staff[3] or "Not specified"))
         fields.addRow("Employment status", QLabel(self.staff[4]))
         rotation = self.staff[5]
-        rotation_text = (
-            f"Rotation {rotation + 1}"
-            if rotation is not None
-            else "Not assigned"
-        )
+        if self.staff[6] in DAILY_DAY_STAFF_TYPES:
+            rotation_text = "Daily day shift · 8:00 AM–6:00 PM"
+        else:
+            rotation_text = (
+                f"Rotation {rotation + 1}"
+                if rotation is not None
+                else "Not assigned"
+            )
         fields.addRow("Duty rotation", QLabel(rotation_text))
         layout.addLayout(fields)
 

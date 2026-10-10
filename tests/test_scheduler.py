@@ -96,9 +96,27 @@ def test_roster_shift_is_independent_of_requested_range():
     assert single_day[0]["nurses"][0]["shift"] == expected
 
 
+def test_daily_day_staff_do_not_rotate_or_get_days_off():
+    staff = [
+        (index, category, f"MPH-{category[:3].upper()}-260001", "",
+         "Active", None, category, "", None)
+        for index, category in enumerate(
+            ["Janitor", "Admin", "Lab Tech", "Front Desk"],
+            start=1,
+        )
+    ]
+    roster = generate_roster(staff, ROTATION_ANCHOR, 12)
+    assert all(
+        entry["shift"] == "Morning"
+        for day in roster
+        for entry in day["nurses"]
+    )
+
+
 if __name__ == "__main__":
     test_three_nurse_rotation()
     test_rotation_repeats_after_six_days()
     test_rotation_patterns()
     test_roster_shift_is_independent_of_requested_range()
+    test_daily_day_staff_do_not_rotate_or_get_days_off()
     print("All scheduler tests passed.")

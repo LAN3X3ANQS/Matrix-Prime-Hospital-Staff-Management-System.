@@ -51,6 +51,7 @@ STAFF_ID_PREFIXES = {
 }
 
 VALID_SHIFTS = ["Morning", "Night", "Legacy"]
+DAILY_DAY_STAFF_TYPES = {"Janitor", "Admin", "Lab Tech", "Front Desk"}
 _database_path_override = threading.local()
 
 def get_connection():
@@ -147,10 +148,10 @@ def initialize_authentication():
         if not password:
             password = secrets.token_urlsafe(18)
             bootstrap_passwords[role] = password
-        if len(password) < 12:
+        if len(password) < 6:
             connection.close()
             raise ValueError(
-                f"{environment_name} must contain at least 12 characters."
+                f"{environment_name} must contain at least 6 characters."
             )
 
         other_role = "STAFF" if role == "ADMIN" else "ADMIN"
@@ -250,9 +251,9 @@ def change_password(role, new_password):
     if not isinstance(new_password, str):
         raise ValueError("Password must be text.")
 
-    if len(new_password) < 12 or not new_password.strip():
+    if len(new_password) < 6 or not new_password.strip():
         raise ValueError(
-            "Password must contain at least 12 characters."
+            "Password must contain at least 6 characters."
         )
 
     password_hash, password_salt = hash_password(
@@ -393,6 +394,7 @@ def _initialize_database():
             status TEXT NOT NULL,
             shift TEXT NOT NULL DEFAULT 'Legacy',
             sign_out_time TEXT,
+            sign_out_status TEXT,
             UNIQUE(nurse_id, attendance_date, shift),
             FOREIGN KEY(nurse_id) REFERENCES nurses(id)
         )
@@ -406,6 +408,7 @@ def _initialize_database():
     if (
         "shift" not in attendance_columns
         or "sign_out_time" not in attendance_columns
+        or "sign_out_status" not in attendance_columns
         or "UNIQUE(nurse_id, attendance_date, shift)" not in attendance_sql
     ):
         cursor.execute("ALTER TABLE attendance RENAME TO attendance_old")
@@ -418,6 +421,7 @@ def _initialize_database():
                 status TEXT NOT NULL,
                 shift TEXT NOT NULL DEFAULT 'Legacy',
                 sign_out_time TEXT,
+                sign_out_status TEXT,
                 UNIQUE(nurse_id, attendance_date, shift),
                 FOREIGN KEY(nurse_id) REFERENCES nurses(id)
             )
@@ -430,6 +434,9 @@ def _initialize_database():
         old_sign_out = (
             "sign_out_time" if "sign_out_time" in old_columns else "NULL"
         )
+        old_sign_out_status = (
+            "sign_out_status" if "sign_out_status" in old_columns else "NULL"
+        )
         cursor.execute(f"""
             INSERT INTO attendance (
                 id,
@@ -438,7 +445,8 @@ def _initialize_database():
                 attendance_time,
                 status,
                 shift,
-                sign_out_time
+                sign_out_time,
+                sign_out_status
             )
             SELECT
                 id,
@@ -447,7 +455,8 @@ def _initialize_database():
                 attendance_time,
                 status,
                 {old_shift},
-                {old_sign_out}
+                {old_sign_out},
+                {old_sign_out_status}
             FROM attendance_old
         """)
         cursor.execute("DROP TABLE attendance_old")
@@ -653,7 +662,8 @@ def get_active_staff():
 def generate_staff_id(staff_type, cursor=None):
     if staff_type not in STAFF_ID_PREFIXES:
         raise ValueError("Invalid staff category.")
-    prefix = f"MPH-{STAFF_ID_PREFIXES[staff_type]}-"
+    year_prefix = f"{date.today().year % 100:02d}"
+    prefix = f"MPH-{STAFF_ID_PREFIXES[staff_type]}-{year_prefix}"
     owns_connection = cursor is None
     connection = get_connection() if owns_connection else None
     active_cursor = cursor or connection.cursor()
@@ -663,16 +673,17 @@ def generate_staff_id(staff_type, cursor=None):
     )
     largest_number = 0
     for (existing_id,) in active_cursor.fetchall():
-        try:
-            largest_number = max(
-                largest_number,
-                int(existing_id.rsplit("-", 1)[1]),
-            )
-        except (IndexError, ValueError):
-            continue
+        sequence = existing_id[len(prefix):]
+        if len(sequence) == 4 and sequence.isdigit():
+            largest_number = max(largest_number, int(sequence))
     if owns_connection:
         connection.close()
-    return f"{prefix}{largest_number + 1:06d}"
+    next_number = largest_number + 1
+    if next_number > 9999:
+        raise ValueError(
+            f"No more Staff IDs are available for {staff_type} in {date.today().year}."
+        )
+    return f"{prefix}{next_number:04d}"
 
 
 def add_staff(
@@ -688,7 +699,9 @@ def add_staff(
         raise ValueError("Invalid staff status.")
     if staff_type not in VALID_STAFF_TYPES:
         raise ValueError("Invalid staff category.")
-    if rotation_position is not None and rotation_position not in [0, 1, 2]:
+    if staff_type in DAILY_DAY_STAFF_TYPES:
+        rotation_position = None
+    elif rotation_position is not None and rotation_position not in [0, 1, 2]:
         raise ValueError("Rotation position must be 0, 1, or 2.")
 
     connection = get_connection()
@@ -755,7 +768,9 @@ def update_nurse(
     if staff_type not in VALID_STAFF_TYPES:
         raise ValueError("Invalid staff category.")
 
-    if rotation_position is not None:
+    if staff_type in DAILY_DAY_STAFF_TYPES:
+        rotation_position = None
+    elif rotation_position is not None:
         if rotation_position not in [0, 1, 2]:
             raise ValueError("Rotation position must be 0, 1, or 2.")
 
@@ -916,25 +931,33 @@ def mark_attendance(
     connection.close()
 
 
-def record_sign_out(nurse_id, attendance_date, shift, sign_out_time):
+def record_sign_out(
+    nurse_id,
+    attendance_date,
+    shift,
+    sign_out_time,
+    sign_out_status="On time",
+):
     try:
         date.fromisoformat(attendance_date)
     except (TypeError, ValueError) as error:
         raise ValueError("Invalid attendance date.") from error
     if shift not in {"Morning", "Night"}:
         raise ValueError("Invalid attendance shift.")
+    if sign_out_status not in {"Early", "On time"}:
+        raise ValueError("Invalid sign-out status.")
     connection = get_connection()
     cursor = connection.cursor()
     cursor.execute(
         """
         UPDATE attendance
-        SET sign_out_time = ?
+        SET sign_out_time = ?, sign_out_status = ?
         WHERE nurse_id = ?
           AND attendance_date = ?
           AND shift = ?
           AND sign_out_time IS NULL
         """,
-        (sign_out_time, nurse_id, attendance_date, shift),
+        (sign_out_time, sign_out_status, nurse_id, attendance_date, shift),
     )
     updated = cursor.rowcount
     connection.commit()
@@ -950,7 +973,7 @@ def get_attendance_for_staff_shift(nurse_id, attendance_date, shift):
     cursor = connection.cursor()
     cursor.execute(
         """
-        SELECT id, attendance_time, status, sign_out_time
+        SELECT id, attendance_time, status, sign_out_time, sign_out_status
         FROM attendance
         WHERE nurse_id = ? AND attendance_date = ? AND shift = ?
         """,
@@ -982,7 +1005,8 @@ def get_attendance_for_date(attendance_date):
             nurses.staff_type,
             attendance.shift,
             attendance.sign_out_time,
-            nurses.unit
+            nurses.unit,
+            attendance.sign_out_status
         FROM attendance
         INNER JOIN nurses
             ON attendance.nurse_id = nurses.id
@@ -1023,7 +1047,8 @@ def get_attendance_by_date_range(start_date, end_date):
             nurses.staff_type,
             attendance.shift,
             attendance.sign_out_time,
-            nurses.unit
+            nurses.unit,
+            attendance.sign_out_status
         FROM attendance
         INNER JOIN nurses
             ON attendance.nurse_id = nurses.id
